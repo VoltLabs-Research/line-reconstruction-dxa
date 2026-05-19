@@ -24,19 +24,6 @@ cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
 project(line-reconstruction-dxa VERSION 1.0.0 LANGUAGES CXX)
 
-option(LINE_RECONSTRUCTION_DXA_BOOTSTRAP_LOCAL_DEPS "Bootstrap local VoltLabs dependencies when packaged configs are unavailable" ON)
-set(VOLTLABS_ROOT "${CMAKE_SOURCE_DIR}/../voltlabs" CACHE PATH "Path to the local VoltLabs workspace")
-set(CORETOOLKIT_SOURCE_DIR "${VOLTLABS_ROOT}/CoreToolkit" CACHE PATH "Local CoreToolkit source directory")
-set(STRUCTURE_IDENTIFICATION_SOURCE_DIR "${VOLTLABS_ROOT}/StructureIdentification" CACHE PATH "Local StructureIdentification source directory")
-set(OPENDXA_SOURCE_DIR "${VOLTLABS_ROOT}/OpenDXA" CACHE PATH "Local OpenDXA source directory")
-set(CORETOOLKIT_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/_deps/install/coretoolkit" CACHE PATH "Install prefix for local CoreToolkit bootstrap")
-set(STRUCTURE_IDENTIFICATION_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/_deps/install/structure-identification" CACHE PATH "Install prefix for local StructureIdentification bootstrap")
-set(OPENDXA_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/_deps/install/opendxa" CACHE PATH "Install prefix for local OpenDXA bootstrap")
-
-if(LINE_RECONSTRUCTION_DXA_BOOTSTRAP_LOCAL_DEPS)
-    list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-endif()
-
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,53 +37,34 @@ find_package(structure-identification REQUIRED)
 find_package(opendxa REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(Boost REQUIRED)
+find_package(TBB REQUIRED)
 
-get_target_property(OPENDXA_INCLUDE_DIRS opendxa::opendxa INTERFACE_INCLUDE_DIRECTORIES)
-if(NOT OPENDXA_INCLUDE_DIRS OR OPENDXA_INCLUDE_DIRS STREQUAL "OPENDXA_INCLUDE_DIRS-NOTFOUND")
-    set(OPENDXA_INCLUDE_DIRS)
+set(LRDXA_BOOST_TARGET "")
+if(TARGET Boost::headers)
+    set(LRDXA_BOOST_TARGET Boost::headers)
+elseif(TARGET Boost::boost)
+    set(LRDXA_BOOST_TARGET Boost::boost)
+elseif(TARGET boost::headers)
+    set(LRDXA_BOOST_TARGET boost::headers)
+elseif(TARGET boost::boost)
+    set(LRDXA_BOOST_TARGET boost::boost)
+else()
+    message(FATAL_ERROR "LineReconstructionDXA requires a Boost headers target")
 endif()
-set(LOCAL_OPENDXA_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../OpenDXA/include")
-if(EXISTS "${LOCAL_OPENDXA_INCLUDE_DIR}")
-    list(PREPEND OPENDXA_INCLUDE_DIRS "${LOCAL_OPENDXA_INCLUDE_DIR}")
-endif()
-
-set(LRDXA_LOCAL_DEP_INCLUDE_DIRS)
-foreach(local_dep_include
-    "${CMAKE_SOURCE_DIR}/../../tools/CoreToolkit/include"
-    "${CMAKE_SOURCE_DIR}/../StructureIdentification/include"
-)
-    if(EXISTS "${local_dep_include}")
-        list(APPEND LRDXA_LOCAL_DEP_INCLUDE_DIRS "${local_dep_include}")
-    endif()
-endforeach()
-
-function(append_imported_library out_var target_name)
-    if(NOT TARGET "${target_name}")
-        return()
-    endif()
-
-    get_target_property(imported_location "${target_name}" IMPORTED_LOCATION_RELEASE)
-    if(NOT imported_location OR imported_location STREQUAL "imported_location-NOTFOUND")
-        get_target_property(imported_location "${target_name}" IMPORTED_LOCATION)
-    endif()
-
-    if(imported_location AND NOT imported_location STREQUAL "imported_location-NOTFOUND")
-        set(${out_var} ${${out_var}} "${imported_location}" PARENT_SCOPE)
-    endif()
-endfunction()
 
 file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.cpp)
-list(FILTER LIB_SOURCES EXCLUDE REGEX ".*main\.cpp$")
+list(FILTER LIB_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
 
 add_library(${PROJECT_NAME}_lib STATIC ${LIB_SOURCES})
 set_target_properties(${PROJECT_NAME}_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-target_include_directories(${PROJECT_NAME}_lib BEFORE PUBLIC
-    ${LRDXA_LOCAL_DEP_INCLUDE_DIRS}
-    ${OPENDXA_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_include_directories(${PROJECT_NAME}_lib PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_precompile_headers(${PROJECT_NAME}_lib PRIVATE <volt/core/volt.h>)
+target_link_libraries(${PROJECT_NAME}_lib PUBLIC
+    ${LRDXA_BOOST_TARGET}
+    TBB::tbb
+)
 target_link_libraries(${PROJECT_NAME}_lib PRIVATE
     opendxa::opendxa
     coretoolkit::coretoolkit
@@ -109,14 +77,6 @@ add_executable(${PROJECT_NAME} ${CMAKE_SOURCE_DIR}/src/main.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_precompile_headers(${PROJECT_NAME} PRIVATE <volt/core/volt.h>)
 
-set(LRDXA_MANUAL_LINK_LIBS)
-append_imported_library(LRDXA_MANUAL_LINK_LIBS "CONAN_LIB::opendxa_opendxa_lib_RELEASE")
-append_imported_library(LRDXA_MANUAL_LINK_LIBS "CONAN_LIB::structure-identification_structure-identification_RELEASE")
-append_imported_library(LRDXA_MANUAL_LINK_LIBS "CONAN_LIB::coretoolkit_coretoolkit_RELEASE")
-append_imported_library(LRDXA_MANUAL_LINK_LIBS "CONAN_LIB::coretoolkit_ptm_RELEASE")
-append_imported_library(LRDXA_MANUAL_LINK_LIBS "CONAN_LIB::coretoolkit_mwm_csp_RELEASE")
-append_imported_library(LRDXA_MANUAL_LINK_LIBS "CONAN_LIB::coretoolkit_geogram_RELEASE")
-
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ${PROJECT_NAME}_lib
     opendxa::opendxa
@@ -124,7 +84,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     coretoolkit::coretoolkit
     spdlog::spdlog
     nlohmann_json::nlohmann_json
-    ${LRDXA_MANUAL_LINK_LIBS}
 )
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

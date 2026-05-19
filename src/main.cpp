@@ -1,6 +1,7 @@
 #include <volt/cli/common.h>
 #include <volt/lrdxa_service.h>
 #include <volt/structures/crystal_structure_types.h>
+#include <volt/structures/crystal_topology_registry.h>
 #include <oneapi/tbb/global_control.h>
 #include <tbb/info.h>
 #include <algorithm>
@@ -30,6 +31,7 @@ void showUsage(const std::string& name) {
         << "  --clusters-table <path>                 Path to *_clusters.table exported upstream.\n"
         << "  --clusters-transitions <path>           Path to *_cluster_transitions.table exported upstream.\n"
         << "  --crystalStructure <type>              Reference crystal structure. (BCC|FCC|HCP|CUBIC_DIAMOND|HEX_DIAMOND|SC) [default: FCC]\n"
+        << "  --lattice-dir <path>                   Directory containing lattice topology YAMLs.\n"
         << "  --crystalPathSteps <int>               Maximum crystal-path steps used for edge vectors. [default: 4]\n"
         << "  --tessellationGhostLayerScale <float>  Ghost-layer scale relative to neighbor distance. [default: 3.5]\n"
         << "  --alphaScale <float>                   Alpha threshold scale relative to neighbor distance. [default: 3.5]\n"
@@ -106,6 +108,12 @@ int main(int argc, char* argv[]) {
     );
     initLogging("line-reconstruction-dxa");
     spdlog::info("Using {} threads (OneTBB)", requestedThreads);
+
+    const std::string latticeDirectory = getString(opts, "--lattice-dir", "");
+    if(!latticeDirectory.empty()){
+        setCrystalTopologySearchRoot(latticeDirectory);
+        spdlog::info("Using lattice directory: {}", latticeDirectory);
+    }
 
     LammpsParser::Frame frame;
     if(!parseFrame(filename, frame)) return 1;

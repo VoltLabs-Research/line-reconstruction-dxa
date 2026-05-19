@@ -21,6 +21,31 @@ Vector3 getGlobalBurgersVector(const ClusterVector& burgersVector) {
 
 json wrapSimulationCellInfoJson(const SimulationCell& cell, json&& cellJson) {
     const auto& pbcFlags = cell.pbcFlags();
+    const Vector3 a = cell.matrix().column(0);
+    const Vector3 b = cell.matrix().column(1);
+    const Vector3 c = cell.matrix().column(2);
+    json cellListing = json::array({
+        json{
+            {"volume", cell.volume3D()},
+            {"is_2d", cell.is2D()},
+            {"effective_dimensions", cell.is2D() ? 2 : 3},
+            {"a_x", a.x()},
+            {"a_y", a.y()},
+            {"a_z", a.z()},
+            {"b_x", b.x()},
+            {"b_y", b.y()},
+            {"b_z", b.z()},
+            {"c_x", c.x()},
+            {"c_y", c.y()},
+            {"c_z", c.z()},
+            {"a_length", a.length()},
+            {"b_length", b.length()},
+            {"c_length", c.length()},
+            {"pbc_x", pbcFlags[0]},
+            {"pbc_y", pbcFlags[1]},
+            {"pbc_z", pbcFlags[2]}
+        }
+    });
     return {
         {"export", {{"SimulationCellExporter", {{"simulation_cell", cellJson}}}}},
         {"main_listing", {
@@ -30,7 +55,7 @@ json wrapSimulationCellInfoJson(const SimulationCell& cell, json&& cellJson) {
             {"effective_dimensions", cell.is2D() ? 2 : 3},
             {"periodic_dimensions", static_cast<int>(pbcFlags[0]) + static_cast<int>(pbcFlags[1]) + static_cast<int>(pbcFlags[2])}
         }},
-        {"sub_listings", {{"simulation_cell", std::move(cellJson)}}}
+        {"sub_listings", {{"simulation_cell", std::move(cellListing)}}}
     };
 }
 

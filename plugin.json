@@ -1,0 +1,239 @@
+{
+  "workflow": {
+    "nodes": [
+      {
+        "id": "plugin-metadata",
+        "type": "modifier",
+        "position": {
+          "x": 240,
+          "y": 160
+        },
+        "data": {
+          "modifier": {
+            "name": "Line Reconstruction DXA",
+            "key": "line-reconstruction-dxa",
+            "icon": "HiCube",
+            "author": "Rodolfo Herrera",
+            "license": "MIT",
+            "version": "1.0.0",
+            "homepage": "https://github.com/rodyherrera/Volterra",
+            "description": "Reconstruccion de lineas de dislocacion via DXA con clusters tables."
+          }
+        }
+      },
+      {
+        "id": "plugin-arguments",
+        "type": "arguments",
+        "position": {
+          "x": 528,
+          "y": 208
+        },
+        "data": {
+          "arguments": {
+            "arguments": [
+              {
+                "argument": "crystalStructure",
+                "type": "select",
+                "label": "Crystal Structure",
+                "default": "FCC",
+                "options": [
+                  {
+                    "key": "FCC",
+                    "label": "FCC"
+                  },
+                  {
+                    "key": "BCC",
+                    "label": "BCC"
+                  },
+                  {
+                    "key": "HCP",
+                    "label": "HCP"
+                  },
+                  {
+                    "key": "CUBIC_DIAMOND",
+                    "label": "Cubic Diamond"
+                  },
+                  {
+                    "key": "HEX_DIAMOND",
+                    "label": "Hexagonal Diamond"
+                  }
+                ]
+              },
+              {
+                "argument": "crystalPathSteps",
+                "type": "number",
+                "label": "Crystal Path Steps",
+                "default": 4,
+                "min": 1,
+                "step": 1
+              },
+              {
+                "argument": "alphaScale",
+                "type": "number",
+                "label": "Alpha Scale",
+                "default": 3.5,
+                "min": 0,
+                "step": 0.1
+              },
+              {
+                "argument": "smoothingIterations",
+                "type": "number",
+                "label": "Smoothing Iterations",
+                "default": 0,
+                "min": 0,
+                "step": 1
+              },
+              {
+                "argument": "linePointInterval",
+                "type": "number",
+                "label": "Line Point Interval",
+                "default": 1.2,
+                "min": 0,
+                "step": 0.1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "trajectory-context",
+        "type": "context",
+        "position": {
+          "x": 816,
+          "y": 160
+        },
+        "data": {
+          "context": {
+            "source": "trajectory_dumps"
+          }
+        }
+      },
+      {
+        "id": "foreach-trajectory-dumps",
+        "type": "forEach",
+        "position": {
+          "x": 1088,
+          "y": 208
+        },
+        "data": {
+          "forEach": {
+            "iterableSource": "{{ trajectory-context.trajectory_dumps }}"
+          }
+        }
+      },
+      {
+        "id": "analysis-entrypoint",
+        "type": "entrypoint",
+        "position": {
+          "x": 1392,
+          "y": 208
+        },
+        "data": {
+          "entrypoint": {
+            "type": "python-script",
+            "binary": "line-reconstruction-dxa-plugin.zip",
+            "binaryObjectPath": "__UPLOAD_BINARY_OBJECT_PATH__",
+            "binaryFileName": "line-reconstruction-dxa-plugin.zip",
+            "entrypointScript": "scripts/lrdxa_plugin_wrapper.py",
+            "requirementsFile": "",
+            "arguments": "{{ foreach-trajectory-dumps.currentValue.path }} {{ foreach-trajectory-dumps.outputPath }} {{ plugin-arguments.as_str }}",
+            "timeout": -1,
+            "inputs": [
+              {
+                "name": "annotatedDump",
+                "required": true,
+                "description": "Per-atom annotated LAMMPS dump produced by an upstream structure-identification step."
+              },
+              {
+                "name": "clustersTable",
+                "required": true,
+                "cliFlag": "--clusters-table",
+                "description": "Cluster graph table produced by an upstream structure-identification step."
+              },
+              {
+                "name": "clustersTransitions",
+                "required": true,
+                "cliFlag": "--clusters-transitions",
+                "description": "Cluster transitions table produced by an upstream structure-identification step."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "primary-exposure",
+        "type": "exposure",
+        "position": {
+          "x": 1712,
+          "y": 208
+        },
+        "data": {
+          "exposure": {
+            "name": "Dislocation Lines",
+            "icon": "HiCube",
+            "results": "dislocations.msgpack",
+            "iterable": ""
+          }
+        }
+      },
+      {
+        "id": "primary-export",
+        "type": "export",
+        "position": {
+          "x": 2032,
+          "y": 208
+        },
+        "data": {
+          "export": {
+            "exporter": "DislocationExporter",
+            "type": "glb"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-metadata-arguments",
+        "source": "plugin-metadata",
+        "sourceHandle": "output",
+        "target": "plugin-arguments",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-arguments-context",
+        "source": "plugin-arguments",
+        "sourceHandle": "output",
+        "target": "trajectory-context",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-context-foreach",
+        "source": "trajectory-context",
+        "sourceHandle": "output",
+        "target": "foreach-trajectory-dumps",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-foreach-entrypoint",
+        "source": "foreach-trajectory-dumps",
+        "sourceHandle": "output",
+        "target": "analysis-entrypoint",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-entrypoint-exposure",
+        "source": "analysis-entrypoint",
+        "sourceHandle": "output",
+        "target": "primary-exposure",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-exposure-export",
+        "source": "primary-exposure",
+        "sourceHandle": "output",
+        "target": "primary-export",
+        "targetHandle": "input"
+      }
+    ]
+  }
+}

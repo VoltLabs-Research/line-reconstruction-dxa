@@ -14,6 +14,8 @@ class LineReconstructionDXAConan(ConanFile):
         "structure-identification/1.0.0",
         "common-neighbor-analysis/1.0.0",
         "polyhedral-template-matching/1.0.0",
+        "boost/1.88.0",
+        "onetbb/2021.12.0",
         "spdlog/1.14.1",
         "nlohmann_json/3.11.3",
     )
@@ -44,6 +46,8 @@ class LineReconstructionDXAConan(ConanFile):
         self.cpp_info.bindirs = ["bin"]
         self.cpp_info.libs = ["line-reconstruction-dxa_lib"]
         self.cpp_info.requires = [
+            "boost::headers",
+            "onetbb::onetbb",
             "opendxa::opendxa",
             "coretoolkit::coretoolkit",
             "structure-identification::structure-identification",
