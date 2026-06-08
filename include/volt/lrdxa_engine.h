@@ -119,7 +119,10 @@ private:
     std::vector<TessellationEdge*> _atomOutboundEdges;
     std::vector<TessellationEdge*> _atomInboundEdges;
     std::vector<TessellationEdge*> _unassignedEdges;
-    std::vector<bool> _filledCells;
+    // vector<char> (not vector<bool>): classifyTetrahedra writes distinct
+    // elements from multiple threads, which the bit-packed vector<bool> cannot
+    // do safely.
+    std::vector<char> _filledCells;
     std::unordered_map<std::array<AtomIndex, 3>, DelaunayTessellation::Facet, AtomIndexTripletHash> _primaryFacetLookupMap;
     MemoryPool<TessellationEdge> _edgePool;
     std::shared_ptr<ParticleProperty> _delaunayAtomMask;

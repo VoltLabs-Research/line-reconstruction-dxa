@@ -9,6 +9,9 @@
 #include <cmath>
 #include <array>
 
+#include <tbb/parallel_for.h>
+#include <tbb/blocked_range.h>
+
 namespace Volt::DXA {
 
 namespace {
@@ -261,9 +264,16 @@ void LineReconstructionDXAAlgorithm::classifyTetrahedra(double alpha) {
         return true;
     };
 
-    for(DelaunayTessellation::CellHandle cell : _tessellation.cells()) {
-        _filledCells[cell] = isInteriorTetrahedron(cell);
-    }
+    // Per-cell, read-only alpha test (alphaTest/mirrorFacet/isGhostCell are
+    // const on the tessellation and called concurrently in opendxa too); each
+    // cell writes a distinct _filledCells[cell], so this parallelizes cleanly.
+    const size_t numCells = _tessellation.numberOfTetrahedra();
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, numCells, 4096),
+        [&](const tbb::blocked_range<size_t>& r){
+            for(size_t cell = r.begin(); cell < r.end(); ++cell){
+                _filledCells[cell] = isInteriorTetrahedron(static_cast<DelaunayTessellation::CellHandle>(cell)) ? 1 : 0;
+            }
+        });
 }
 
 void LineReconstructionDXAAlgorithm::generateTessellationEdges() {

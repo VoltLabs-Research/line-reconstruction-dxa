@@ -15,7 +15,7 @@
             "icon": "HiCube",
             "author": "Rodolfo Herrera",
             "license": "MIT",
-            "version": "1.0.1",
+            "version": "1.0.2",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Reconstruccion de lineas de dislocacion via DXA con clusters tables."
           }
@@ -130,12 +130,10 @@
         },
         "data": {
           "entrypoint": {
-            "type": "python-script",
-            "binary": "line-reconstruction-dxa-plugin.zip",
+            "type": "executable",
+            "binary": "line-reconstruction-dxa",
             "binaryObjectPath": "__UPLOAD_BINARY_OBJECT_PATH__",
-            "binaryFileName": "line-reconstruction-dxa-plugin.zip",
-            "entrypointScript": "scripts/lrdxa_plugin_wrapper.py",
-            "requirementsFile": "",
+            "binaryFileName": "line-reconstruction-dxa",
             "arguments": "{{ foreach-trajectory-dumps.currentValue.path }} {{ foreach-trajectory-dumps.outputPath }} {{ plugin-arguments.as_str }}",
             "timeout": -1,
             "inputs": [
