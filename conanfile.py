@@ -9,11 +9,11 @@ class LineReconstructionDXAConan(ConanFile):
     license = "MIT"
     settings = "os", "arch", "compiler", "build_type"
     requires = (
-        "opendxa/1.0.3",
+        "opendxa/1.0.4",
         "coretoolkit/1.0.0",
         "structure-identification/1.0.1",
         "common-neighbor-analysis/1.0.2",
-        "polyhedral-template-matching/1.0.4",
+        "polyhedral-template-matching/1.0.5",
         "boost/1.88.0",
         "onetbb/2021.12.0",
         "spdlog/1.14.1",
