@@ -335,12 +335,12 @@ json LineReconstructionJsonExporter::exportLineSegmentsToJson(
     return data;
 }
 
-void LineReconstructionJsonExporter::writeLineSegmentsMsgpackToFile(
+void LineReconstructionJsonExporter::writeLineSegmentsParquetToFile(
     const std::vector<DXA::LineReconstructionSegment>& segments,
     const SimulationCell& simulationCell,
     const std::string& filePath
 ) {
-    JsonUtils::writeJsonMsgpackToFile(exportLineSegmentsToJson(segments, &simulationCell), filePath, false);
+    JsonUtils::writeJsonToParquet(exportLineSegmentsToJson(segments, &simulationCell), filePath, false);
 }
 
 json LineReconstructionJsonExporter::exportDislocationLinesToJson(
@@ -429,12 +429,12 @@ json LineReconstructionJsonExporter::exportDislocationLinesToJson(
     return data;
 }
 
-void LineReconstructionJsonExporter::writeDislocationLinesMsgpackToFile(
+void LineReconstructionJsonExporter::writeDislocationLinesParquetToFile(
     const std::vector<DXA::LineReconstructionDislocationLine>& lines,
     const SimulationCell& simulationCell,
     const std::string& filePath
 ) {
-    JsonUtils::writeJsonMsgpackToFile(exportDislocationLinesToJson(lines, &simulationCell), filePath, false);
+    JsonUtils::writeJsonToParquet(exportDislocationLinesToJson(lines, &simulationCell), filePath, false);
 }
 
 json LineReconstructionJsonExporter::exportUnassignedEdgesToJson(
@@ -459,19 +459,19 @@ json LineReconstructionJsonExporter::exportUnassignedEdgesToJson(
     return data;
 }
 
-void LineReconstructionJsonExporter::writeUnassignedEdgesMsgpackToFile(
+void LineReconstructionJsonExporter::writeUnassignedEdgesParquetToFile(
     const std::vector<DXA::LineReconstructionUnassignedEdge>& edges,
     const std::string& filePath
 ) {
-    JsonUtils::writeJsonMsgpackToFile(exportUnassignedEdgesToJson(edges), filePath, false);
+    JsonUtils::writeJsonToParquet(exportUnassignedEdgesToJson(edges), filePath, false);
 }
 
-void LineReconstructionJsonExporter::writeInterfaceMeshMsgpackToFile(
+void LineReconstructionJsonExporter::writeInterfaceMeshParquetToFile(
     const DXA::LineReconstructionInterfaceMesh& mesh,
     const StructureAnalysis& structureAnalysis,
     const std::string& filePath
 ) {
-    JsonUtils::writeJsonMsgpackToFile(getMeshData(mesh, structureAnalysis), filePath, false);
+    JsonUtils::writeJsonToParquet(getMeshData(mesh, structureAnalysis), filePath, false);
 }
 
 json LineReconstructionJsonExporter::vectorToJson(const Vector3& vector) {

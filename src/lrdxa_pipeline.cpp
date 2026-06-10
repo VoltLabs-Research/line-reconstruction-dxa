@@ -20,32 +20,32 @@ json LineReconstructionDXAPipeline::run(
     algorithm.run(options, markStage);
 
     if(!outputFile.empty()) {
-        jsonExporter.writeDislocationLinesMsgpackToFile(
+        jsonExporter.writeDislocationLinesParquetToFile(
             algorithm.dislocationLines(),
             frame.simulationCell,
-            outputFile + "_dislocations.msgpack"
+            outputFile + "_dislocations.parquet"
         );
-        if(markStage) markStage("stream_dislocations_msgpack");
-        jsonExporter.writeLineSegmentsMsgpackToFile(
+        if(markStage) markStage("stream_dislocations_parquet");
+        jsonExporter.writeLineSegmentsParquetToFile(
             algorithm.dislocationSegments(),
             frame.simulationCell,
-            outputFile + "_dislocation_segments.msgpack"
+            outputFile + "_dislocation_segments.parquet"
         );
-        if(markStage) markStage("stream_dislocation_segments_msgpack");
-        jsonExporter.writeUnassignedEdgesMsgpackToFile(
+        if(markStage) markStage("stream_dislocation_segments_parquet");
+        jsonExporter.writeUnassignedEdgesParquetToFile(
             algorithm.unassignedEdges(),
-            outputFile + "_unassigned_edges.msgpack"
+            outputFile + "_unassigned_edges.parquet"
         );
-        if(markStage) markStage("stream_unassigned_edges_msgpack");
-        jsonExporter.writeInterfaceMeshMsgpackToFile(
+        if(markStage) markStage("stream_unassigned_edges_parquet");
+        jsonExporter.writeInterfaceMeshParquetToFile(
             algorithm.interfaceMesh(),
             reconstructionStructureAnalysis,
-            outputFile + "_interface_mesh.msgpack"
+            outputFile + "_interface_mesh.parquet"
         );
-        if(markStage) markStage("stream_interface_mesh_msgpack");
+        if(markStage) markStage("stream_interface_mesh_parquet");
         const auto simCellInfo = jsonExporter.getExtendedSimulationCellInfo(frame.simulationCell);
-        JsonUtils::writeJsonMsgpackToFile(simCellInfo, outputFile + "_simulation_cell.msgpack", false);
-        if(markStage) markStage("stream_simulation_cell_msgpack");
+        JsonUtils::writeJsonToParquet(simCellInfo, outputFile + "_simulation_cell.parquet", false);
+        if(markStage) markStage("stream_simulation_cell_parquet");
     }
 
     json result;

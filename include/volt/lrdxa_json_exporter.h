@@ -17,24 +17,24 @@ public:
 
     json getExtendedSimulationCellInfo(const SimulationCell& cell);
 
-    void writeLineSegmentsMsgpackToFile(
+    void writeLineSegmentsParquetToFile(
         const std::vector<DXA::LineReconstructionSegment>& segments,
         const SimulationCell& simulationCell,
         const std::string& filePath
     );
 
-    void writeDislocationLinesMsgpackToFile(
+    void writeDislocationLinesParquetToFile(
         const std::vector<DXA::LineReconstructionDislocationLine>& lines,
         const SimulationCell& simulationCell,
         const std::string& filePath
     );
 
-    void writeUnassignedEdgesMsgpackToFile(
+    void writeUnassignedEdgesParquetToFile(
         const std::vector<DXA::LineReconstructionUnassignedEdge>& edges,
         const std::string& filePath
     );
 
-    void writeInterfaceMeshMsgpackToFile(
+    void writeInterfaceMeshParquetToFile(
         const DXA::LineReconstructionInterfaceMesh& mesh,
         const StructureAnalysis& structureAnalysis,
         const std::string& filePath
