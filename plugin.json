@@ -15,7 +15,7 @@
             "icon": "HiCube",
             "author": "Rodolfo Herrera",
             "license": "MIT",
-            "version": "1.0.2",
+            "version": "2.0.0",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Reconstruccion de lineas de dislocacion via DXA con clusters tables."
           }
