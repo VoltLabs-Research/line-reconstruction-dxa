@@ -169,7 +169,7 @@
           "exposure": {
             "name": "Dislocation Lines",
             "icon": "HiCube",
-            "results": "dislocations.msgpack",
+            "results": "dislocations.parquet",
             "iterable": ""
           }
         }

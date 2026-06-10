@@ -20,7 +20,7 @@ PTM_BINARY_NAME = "polyhedral-template-matching"
 PLUGIN_REPO_DIRNAME = "LineReconstructionDXA"
 ENV_BINARY_OVERRIDE = "VOLT_LRDXA_BINARY"
 ENV_PTM_BINARY_OVERRIDE = "VOLT_PTM_BINARY"
-REQUIRED_OUTPUTS = ["_dislocations.msgpack"]
+REQUIRED_OUTPUTS = ["_dislocations.parquet"]
 LOG_TAG = "lrdxa-plugin"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
