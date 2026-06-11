@@ -6,7 +6,10 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <volt/helpers/dxa_serialization.h>
+#include <volt/structures/crystal_structure_types.h>
 #include <volt/utilities/json_utils.h>
+#include <volt/utilities/parquet_line_writer.h>
 
 namespace Volt {
 
@@ -216,217 +219,52 @@ json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const Str
     return meshData;
 }
 
-json LineReconstructionJsonExporter::exportLineSegmentsToJson(
-    const std::vector<DXA::LineReconstructionSegment>& segments,
-    const SimulationCell* simulationCell
-) {
-    json segmentArray = json::array();
-    int globalChunkId = 0;
-
-    for(const auto& segment : segments) {
-        const Vector3 burgersLocal = segment.burgersVector.localVec();
-        const Vector3 burgersGlobal = getGlobalBurgersVector(segment.burgersVector);
-        if(simulationCell) {
-            std::vector<Point3> line = {segment.position1, segment.position2};
-            std::vector<Point3> currentChunk;
-            clipDislocationLine(line, *simulationCell, [&](const Point3& p1, const Point3& p2, bool isInitialSegment) {
-                if(isInitialSegment && !currentChunk.empty()) {
-                    const Point3 cp1 = currentChunk.front();
-                    const Point3 cp2 = currentChunk.back();
-                    double chunkLength = 0.0;
-                    json points = json::array();
-                    for(size_t i = 0; i < currentChunk.size(); ++i) {
-                        points.push_back({currentChunk[i].x(), currentChunk[i].y(), currentChunk[i].z()});
-                        if(i > 0) chunkLength += (currentChunk[i] - currentChunk[i - 1]).length();
-                    }
-                    segmentArray.push_back({
-                        {"segment_id", globalChunkId++},
-                        {"points", points},
-                        {"num_points", static_cast<int>(currentChunk.size())},
-                        {"length", chunkLength},
-                        {"position1", {cp1.x(), cp1.y(), cp1.z()}},
-                        {"position2", {cp2.x(), cp2.y(), cp2.z()}},
-                        {"burgers_vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                        {"burgers_vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                        {"burgers_vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                        {"burgers", {
-                            {"vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                            {"vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                            {"vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                            {"magnitude", burgersLocal.length()}
-                        }},
-                        {"magnitude", burgersLocal.length()},
-                        {"cluster_id", segment.clusterId},
-                        {"structure_type", segment.structureType},
-                        {"stage", segment.stage}
-                    });
-                    currentChunk.clear();
-                }
-                if(currentChunk.empty()) {
-                    currentChunk.push_back(p1);
-                }
-                currentChunk.push_back(p2);
-            });
-            if(!currentChunk.empty()) {
-                const Point3 cp1 = currentChunk.front();
-                const Point3 cp2 = currentChunk.back();
-                double chunkLength = 0.0;
-                json points = json::array();
-                for(size_t i = 0; i < currentChunk.size(); ++i) {
-                    points.push_back({currentChunk[i].x(), currentChunk[i].y(), currentChunk[i].z()});
-                    if(i > 0) chunkLength += (currentChunk[i] - currentChunk[i - 1]).length();
-                }
-                segmentArray.push_back({
-                    {"segment_id", globalChunkId++},
-                    {"points", points},
-                    {"num_points", static_cast<int>(currentChunk.size())},
-                    {"length", chunkLength},
-                    {"position1", {cp1.x(), cp1.y(), cp1.z()}},
-                    {"position2", {cp2.x(), cp2.y(), cp2.z()}},
-                    {"burgers_vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                    {"burgers_vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                    {"burgers_vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                    {"burgers", {
-                        {"vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                        {"vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                        {"vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                        {"magnitude", burgersLocal.length()}
-                    }},
-                    {"magnitude", burgersLocal.length()},
-                    {"cluster_id", segment.clusterId},
-                    {"structure_type", segment.structureType},
-                    {"stage", segment.stage}
-                });
-            }
-        } else {
-            const double chunkLength = (segment.position2 - segment.position1).length();
-            segmentArray.push_back({
-                {"segment_id", globalChunkId++},
-                {"points", {{segment.position1.x(), segment.position1.y(), segment.position1.z()}, {segment.position2.x(), segment.position2.y(), segment.position2.z()}}},
-                {"num_points", 2},
-                {"length", chunkLength},
-                {"position1", {segment.position1.x(), segment.position1.y(), segment.position1.z()}},
-                {"position2", {segment.position2.x(), segment.position2.y(), segment.position2.z()}},
-                {"burgers_vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                {"burgers_vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                {"burgers_vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                {"burgers", {
-                    {"vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                    {"vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                    {"vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                    {"magnitude", burgersLocal.length()}
-                }},
-                {"magnitude", burgersLocal.length()},
-                {"cluster_id", segment.clusterId},
-                {"structure_type", segment.structureType},
-                {"stage", segment.stage}
-            });
-        }
-    }
-
-    json data;
-    data["main_listing"] = {
-        {"dislocation_segments", static_cast<int>(segmentArray.size())},
-        {"dislocations", static_cast<int>(segmentArray.size())}
-    };
-    data["sub_listings"] = {{"dislocation_segments", segmentArray}};
-    data["export"]["DislocationExporter"]["segments"] = segmentArray;
-    data["export"]["DislocationExporter"]["dislocation_segments"] = segmentArray;
-    return data;
-}
-
 void LineReconstructionJsonExporter::writeLineSegmentsParquetToFile(
     const std::vector<DXA::LineReconstructionSegment>& segments,
     const SimulationCell& simulationCell,
     const std::string& filePath
 ) {
-    JsonUtils::writeJsonToParquet(exportLineSegmentsToJson(segments, &simulationCell), filePath, false);
-}
-
-json LineReconstructionJsonExporter::exportDislocationLinesToJson(
-    const std::vector<DXA::LineReconstructionDislocationLine>& lines,
-    const SimulationCell* simulationCell
-) {
-    json lineArray = json::array();
-    int globalChunkId = 0;
-    int totalPoints = 0;
-    double totalLength = 0.0;
-
-    for(const auto& line : lines) {
-        const Vector3 burgersLocal = line.burgersVector.localVec();
-        const Vector3 burgersGlobal = getGlobalBurgersVector(line.burgersVector);
-        auto appendLine = [&](const std::vector<Point3>& pointsVec) {
-            if(pointsVec.size() < 2) {
-                return;
+    struct Row {
+        std::vector<Point3> points;
+        double length;
+        const DXA::LineReconstructionSegment* segment;
+    };
+    std::vector<Row> rows;
+    rows.reserve(segments.size());
+    for(const auto& segment : segments) {
+        forEachClippedChunk(
+            {segment.position1, segment.position2},
+            &simulationCell,
+            [&](std::vector<Point3>&& points) {
+                const double length = polylineLength(points);
+                rows.push_back({std::move(points), length, &segment});
             }
-
-            double lineLength = 0.0;
-            json points = json::array();
-            for(size_t i = 0; i < pointsVec.size(); ++i) {
-                points.push_back({pointsVec[i].x(), pointsVec[i].y(), pointsVec[i].z()});
-                if(i > 0) {
-                    lineLength += (pointsVec[i] - pointsVec[i - 1]).length();
-                }
-            }
-            if(line.isClosed && pointsVec.size() > 1) {
-                lineLength += (pointsVec.front() - pointsVec.back()).length();
-            }
-
-            lineArray.push_back({
-                {"line_id", globalChunkId++},
-                {"points", points},
-                {"num_points", static_cast<int>(pointsVec.size())},
-                {"length", lineLength},
-                {"burgers_vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                {"burgers_vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                {"burgers_vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                {"burgers", {
-                    {"vector", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                    {"vector_local", {burgersLocal.x(), burgersLocal.y(), burgersLocal.z()}},
-                    {"vector_global", {burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()}},
-                    {"magnitude", burgersLocal.length()}
-                }},
-                {"magnitude", burgersLocal.length()},
-                {"cluster_id", line.clusterId},
-                {"structure_type", line.structureType},
-                {"is_closed", line.isClosed},
-                {"dislocation_type_id", line.dislocationTypeId}
-            });
-
-            totalPoints += static_cast<int>(pointsVec.size());
-            totalLength += lineLength;
-        };
-
-        if(simulationCell) {
-            std::vector<Point3> currentChunk;
-            clipDislocationLine(line.points, *simulationCell, [&](const Point3& p1, const Point3& p2, bool isInitialSegment) {
-                if(isInitialSegment && !currentChunk.empty()) {
-                    appendLine(currentChunk);
-                    currentChunk.clear();
-                }
-                if(currentChunk.empty()) {
-                    currentChunk.push_back(p1);
-                }
-                currentChunk.push_back(p2);
-            });
-            if(!currentChunk.empty()) {
-                appendLine(currentChunk);
-            }
-        } else {
-            appendLine(line.points);
-        }
+        );
     }
 
-    json data;
-    data["main_listing"] = {
-        {"dislocations", static_cast<int>(lineArray.size())},
-        {"total_points", totalPoints},
-        {"total_length", totalLength}
-    };
-    data["sub_listings"] = {{"dislocations", lineArray}};
-    data["export"]["DislocationExporter"]["segments"] = lineArray;
-    data["export"]["DislocationExporter"]["dislocations"] = lineArray;
-    return data;
+    streamLinesToParquet(
+        filePath,
+        rows.size(),
+        [&](std::size_t i, std::vector<Point3>& outPoints) { outPoints = rows[i].points; },
+        [&](ColumnarLineWriter& writer, std::size_t i) {
+            const auto& row = rows[i];
+            const auto& segment = *row.segment;
+            const Vector3 burgersLocal = segment.burgersVector.localVec();
+            const Vector3 burgersGlobal = getGlobalBurgersVector(segment.burgersVector);
+            const std::string structureName = structureTypeName(segment.structureType);
+            const auto family = DxaSerialization::classifyBurgersFamily(burgersLocal, structureName);
+            writer.field("length", row.length);
+            writer.field("num_points", row.points.size());
+            writer.field("magnitude", burgersLocal.length());
+            writer.field("burgers_vector_local", std::vector<double>{burgersLocal.x(), burgersLocal.y(), burgersLocal.z()});
+            writer.field("burgers_vector_global", std::vector<double>{burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()});
+            writer.field("crystal_structure", structureName);
+            writer.field("burgers_family", family.name);
+            writer.field("burgers_family_label", family.label);
+            writer.field("cluster_id", segment.clusterId);
+            writer.field("stage", segment.stage);
+        }
+    );
 }
 
 void LineReconstructionJsonExporter::writeDislocationLinesParquetToFile(
@@ -434,7 +272,44 @@ void LineReconstructionJsonExporter::writeDislocationLinesParquetToFile(
     const SimulationCell& simulationCell,
     const std::string& filePath
 ) {
-    JsonUtils::writeJsonToParquet(exportDislocationLinesToJson(lines, &simulationCell), filePath, false);
+    struct Row {
+        std::vector<Point3> points;
+        double length;
+        const DXA::LineReconstructionDislocationLine* line;
+    };
+    std::vector<Row> rows;
+    rows.reserve(lines.size());
+    for(const auto& line : lines) {
+        forEachClippedChunk(line.points, &simulationCell, [&](std::vector<Point3>&& points) {
+            const double length = polylineLength(points);
+            rows.push_back({std::move(points), length, &line});
+        });
+    }
+
+    streamLinesToParquet(
+        filePath,
+        rows.size(),
+        [&](std::size_t i, std::vector<Point3>& outPoints) { outPoints = rows[i].points; },
+        [&](ColumnarLineWriter& writer, std::size_t i) {
+            const auto& row = rows[i];
+            const auto& line = *row.line;
+            const Vector3 burgersLocal = line.burgersVector.localVec();
+            const Vector3 burgersGlobal = getGlobalBurgersVector(line.burgersVector);
+            const std::string structureName = structureTypeName(line.structureType);
+            const auto family = DxaSerialization::classifyBurgersFamily(burgersLocal, structureName);
+            writer.field("length", row.length);
+            writer.field("num_points", row.points.size());
+            writer.field("magnitude", burgersLocal.length());
+            writer.field("burgers_vector_local", std::vector<double>{burgersLocal.x(), burgersLocal.y(), burgersLocal.z()});
+            writer.field("burgers_vector_global", std::vector<double>{burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()});
+            writer.field("crystal_structure", structureName);
+            writer.field("burgers_family", family.name);
+            writer.field("burgers_family_label", family.label);
+            writer.field("cluster_id", line.clusterId);
+            writer.field("is_closed", line.isClosed);
+            writer.field("dislocation_type_id", line.dislocationTypeId);
+        }
+    );
 }
 
 json LineReconstructionJsonExporter::exportUnassignedEdgesToJson(
