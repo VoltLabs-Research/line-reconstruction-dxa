@@ -41,14 +41,6 @@ public:
     );
 
 private:
-    json exportLineSegmentsToJson(
-        const std::vector<DXA::LineReconstructionSegment>& segments,
-        const SimulationCell* simulationCell
-    );
-    json exportDislocationLinesToJson(
-        const std::vector<DXA::LineReconstructionDislocationLine>& lines,
-        const SimulationCell* simulationCell
-    );
     json exportUnassignedEdgesToJson(const std::vector<DXA::LineReconstructionUnassignedEdge>& edges);
 
     template <typename MeshType>

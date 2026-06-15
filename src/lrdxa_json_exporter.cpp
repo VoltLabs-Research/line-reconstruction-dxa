@@ -140,6 +140,40 @@ void clipDislocationLine(
     }
 }
 
+double polylineLength(const std::vector<Point3>& points) {
+    double length = 0.0;
+    for(size_t i = 1; i < points.size(); ++i) {
+        length += (points[i] - points[i - 1]).length();
+    }
+    return length;
+}
+
+// Splits a polyline into PBC-clipped chunks and hands each renderable chunk
+// (>= 2 points) to emit().
+void forEachClippedChunk(
+    const std::vector<Point3>& points,
+    const SimulationCell* simulationCell,
+    const std::function<void(std::vector<Point3>&&)>& emit
+) {
+    if(!simulationCell) {
+        if(points.size() >= 2) emit(std::vector<Point3>(points));
+        return;
+    }
+
+    std::vector<Point3> currentChunk;
+    clipDislocationLine(points, *simulationCell, [&](const Point3& p1, const Point3& p2, bool isInitialSegment) {
+        if(isInitialSegment && !currentChunk.empty()) {
+            if(currentChunk.size() >= 2) emit(std::move(currentChunk));
+            currentChunk.clear();
+        }
+        if(currentChunk.empty()) {
+            currentChunk.push_back(p1);
+        }
+        currentChunk.push_back(p2);
+    });
+    if(currentChunk.size() >= 2) emit(std::move(currentChunk));
+}
+
 }
 
 template <typename MeshType>
@@ -330,7 +364,6 @@ json LineReconstructionJsonExporter::exportUnassignedEdgesToJson(
     json data;
     data["main_listing"] = {{"unassigned_edges", static_cast<int>(edges.size())}};
     data["sub_listings"] = {{"unassigned_edges", edgeArray}};
-    data["export"]["DislocationExporter"]["unassigned_edges"] = edgeArray;
     return data;
 }
 
