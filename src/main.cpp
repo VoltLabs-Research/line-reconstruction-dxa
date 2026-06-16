@@ -30,6 +30,7 @@ void showUsage(const std::string& name) {
     std::cerr
         << "  --clusters-table <path>                 Path to *_clusters.table exported upstream.\n"
         << "  --clusters-transitions <path>           Path to *_cluster_transitions.table exported upstream.\n"
+        << "  --neighbor_lattice <path>               Path to *_neighbor_lattice.parquet exported upstream.\n"
         << "  --crystalStructure <type>              Reference crystal structure. (BCC|FCC|HCP|CUBIC_DIAMOND|HEX_DIAMOND|SC) [default: FCC]\n"
         << "  --lattice-dir <path>                   Directory containing lattice topology YAMLs.\n"
         << "  --crystalPathSteps <int>               Maximum crystal-path steps used for edge vectors. [default: 4]\n"
@@ -124,6 +125,7 @@ int main(int argc, char* argv[]) {
     LineReconstructionDXAService analyzer;
     analyzer.setClustersTablePath(getString(opts, "--clusters-table"));
     analyzer.setClusterTransitionsPath(getString(opts, "--clusters-transitions"));
+    analyzer.setNeighborLatticePath(getString(opts, "--neighbor_lattice"));
     analyzer.setInputCrystalStructure(parseCrystalStructure(getString(opts, "--crystalStructure", "FCC")));
     analyzer.setCrystalPathSteps(getInt(opts, "--crystalPathSteps", 4));
     analyzer.setTessellationGhostLayerScale(getDouble(opts, "--tessellationGhostLayerScale", 3.5));
