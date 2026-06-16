@@ -112,6 +112,17 @@
                                     "adaptive-common-neighbor-analysis",
                                     "pattern-structure-matching"
                                 ]
+                            },
+                            {
+                                "argument": "neighbor_lattice",
+                                "type": "string",
+                                "label": "Neighbor Lattice",
+                                "inferFromContext": true,
+                                "plugins": [
+                                    "polyhedral-template-matching",
+                                    "adaptive-common-neighbor-analysis",
+                                    "pattern-structure-matching"
+                                ]
                             }
                         ]
                     }
@@ -175,6 +186,12 @@
                                 "required": true,
                                 "cliFlag": "--clusters-transitions",
                                 "description": "Cluster transitions table produced by an upstream structure-identification step."
+                            },
+                            {
+                                "name": "neighborLattice",
+                                "required": true,
+                                "cliFlag": "--neighbor_lattice",
+                                "description": "Per-atom neighbor topology parquet (neighbor_indices_* + neighbor_lattice_*) produced by an upstream structure-identification step."
                             }
                         ]
                     }
