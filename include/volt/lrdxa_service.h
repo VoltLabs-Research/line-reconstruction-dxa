@@ -19,6 +19,7 @@ public:
     void setInputCrystalStructure(LatticeStructureType structure);
     void setClustersTablePath(std::string path);
     void setClusterTransitionsPath(std::string path);
+    void setNeighborLatticePath(std::string path);
     void setCrystalPathSteps(int crystalPathSteps);
     void setTessellationGhostLayerScale(double tessellationGhostLayerScale);
     void setAlphaScale(double alphaScale);
@@ -34,6 +35,7 @@ private:
     LatticeStructureType _inputCrystalStructure;
     std::string _clustersTablePath;
     std::string _clusterTransitionsPath;
+    std::string _neighborLatticePath;
     int _crystalPathSteps;
     double _tessellationGhostLayerScale;
     double _alphaScale;

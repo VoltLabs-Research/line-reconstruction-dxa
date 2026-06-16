@@ -32,6 +32,10 @@ void LineReconstructionDXA::setClusterTransitionsPath(std::string path) {
     _clusterTransitionsPath = std::move(path);
 }
 
+void LineReconstructionDXA::setNeighborLatticePath(std::string path) {
+    _neighborLatticePath = std::move(path);
+}
+
 void LineReconstructionDXA::setCrystalPathSteps(int crystalPathSteps) {
     _crystalPathSteps = crystalPathSteps;
 }
@@ -86,6 +90,11 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
             "LineReconstructionDXA requires --clusters-table and --clusters-transitions"
         );
     }
+    if(_neighborLatticePath.empty()) {
+        return AnalysisResult::failure(
+            "LineReconstructionDXA requires --neighbor_lattice (per-atom neighbor topology parquet)"
+        );
+    }
 
     auto positions = std::move(prepared.positions);
     markStage("create_position_property");
@@ -97,6 +106,7 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
     std::string reconstructionError;
     if(!ReconstructedStructureLoader::load(
         frame,
+        _neighborLatticePath,
         {_clustersTablePath, _clusterTransitionsPath},
         structureAnalysis,
         context,
