@@ -1,6 +1,6 @@
 {
   "name": "@voltlabs/line-reconstruction-dxa",
-  "version": "2.0.1",
+  "version": "2.1.2",
   "kind": "workflow",
   "publisher": "voltlabs",
   "description": "Experimental DXA",
