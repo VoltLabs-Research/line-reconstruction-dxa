@@ -1,5 +1,6 @@
 #include <volt/lrdxa_engine.h>
 
+#include <volt/core/progress.h>
 #include <volt/helpers/crystal_path_finder.h>
 #include <volt/analysis/structure_analysis.h>
 #include <volt/structures/crystal_structure_types.h>
@@ -187,12 +188,15 @@ void LineReconstructionDXAAlgorithm::run(
 }
 
 void LineReconstructionDXAAlgorithm::markPerfectCrystallineRegions() {
+    const Stopwatch timer;
     const size_t atomCount = _context.atomCount();
     const int computedSubType = computedSubTypeForCrystal(_context.inputCrystalType);
     const bool directCrystalTessellation = crystalUsesDirectTessellation(_context.inputCrystalType);
     _delaunayAtomMask = std::make_shared<ParticleProperty>(atomCount, DataType::Int, 1, 0, true);
     _delaunayVertexCount = 0;
+    ProgressReporter progress("Selecting tessellation vertices", atomCount);
     for(size_t atomIndex = 0; atomIndex < atomCount; ++atomIndex) {
+        progress.update(atomIndex + 1);
         Cluster* cluster = _structureAnalysis.atomCluster(static_cast<int>(atomIndex));
         if(!cluster || cluster->id == 0) {
             _delaunayAtomMask->setInt(atomIndex, 1);
@@ -229,9 +233,16 @@ void LineReconstructionDXAAlgorithm::markPerfectCrystallineRegions() {
         _delaunayAtomMask->setInt(atomIndex, includeAtom);
         _delaunayVertexCount += includeAtom;
     }
+    spdlog::info("Selected {} of {} atoms ({:.1f}%) as tessellation vertices ({}) in {}",
+        _delaunayVertexCount, atomCount,
+        percentOf(static_cast<std::uint64_t>(_delaunayVertexCount), atomCount),
+        directCrystalTessellation ? "whole crystal" : "defect regions",
+        timer.elapsed());
 }
 
 void LineReconstructionDXAAlgorithm::buildTessellation(double ghostLayerSize) {
+    spdlog::info("Building Delaunay tessellation of {} atoms (ghost layer {:.3f})...", _delaunayVertexCount, ghostLayerSize);
+    const Stopwatch timer;
     _tessellation.generateTessellation(
         _context.simCell,
         _context.positions->constDataPoint3(),
@@ -240,9 +251,12 @@ void LineReconstructionDXAAlgorithm::buildTessellation(double ghostLayerSize) {
         false,
         _delaunayAtomMask ? _delaunayAtomMask->constDataInt() : nullptr
     );
+    spdlog::info("Delaunay tessellation ready in {}: {} primary tetrahedra",
+        timer.elapsed(), _tessellation.numberOfPrimaryTetrahedra());
 }
 
 void LineReconstructionDXAAlgorithm::classifyTetrahedra(double alpha) {
+    const Stopwatch timer;
     _filledCells.assign(_tessellation.numberOfTetrahedra(), false);
     auto isInteriorTetrahedron = [&](DelaunayTessellation::CellHandle cell) -> bool {
         if(_tessellation.isGhostCell(cell)) {
@@ -268,12 +282,15 @@ void LineReconstructionDXAAlgorithm::classifyTetrahedra(double alpha) {
     // const on the tessellation and called concurrently in opendxa too); each
     // cell writes a distinct _filledCells[cell], so this parallelizes cleanly.
     const size_t numCells = _tessellation.numberOfTetrahedra();
+    ProgressReporter progress("Classifying tetrahedra", numCells);
     tbb::parallel_for(tbb::blocked_range<size_t>(0, numCells, 4096),
         [&](const tbb::blocked_range<size_t>& r){
             for(size_t cell = r.begin(); cell < r.end(); ++cell){
                 _filledCells[cell] = isInteriorTetrahedron(static_cast<DelaunayTessellation::CellHandle>(cell)) ? 1 : 0;
             }
+            progress.advance(r.size());
         });
+    spdlog::info("Classified {} tetrahedra by alpha-shape test (alpha {:.3f}) in {}", numCells, alpha, timer.elapsed());
 }
 
 void LineReconstructionDXAAlgorithm::generateTessellationEdges() {
