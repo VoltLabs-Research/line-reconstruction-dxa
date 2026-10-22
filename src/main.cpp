@@ -1,4 +1,5 @@
 #include <volt/cli/common.h>
+#include <volt/core/progress.h>
 #include <volt/lrdxa_service.h>
 #include <volt/structures/crystal_structure_types.h>
 #include <volt/structures/crystal_topology_registry.h>
@@ -108,6 +109,7 @@ int main(int argc, char* argv[]) {
         static_cast<std::size_t>(std::max(1, requestedThreads))
     );
     initLogging("line-reconstruction-dxa");
+    const Stopwatch runTimer;
     spdlog::info("Using {} threads (OneTBB)", requestedThreads);
 
     const std::string crystalStructure = getString(opts, "--crystalStructure", "FCC");
@@ -148,9 +150,9 @@ int main(int argc, char* argv[]) {
     spdlog::info("Starting line reconstruction DXA analysis...");
     json result = analyzer.compute(frame, outputBase);
     if(result.value("is_failed", false)) {
-        spdlog::error("Analysis failed: {}", result.value("error", "Unknown error"));
+        spdlog::error("Analysis failed after {}: {}", runTimer.elapsed(), result.value("error", "Unknown error"));
         return 1;
     }
-    spdlog::info("Analysis completed successfully.");
+    spdlog::info("Line Reconstruction DXA completed in {}.", runTimer.elapsed());
     return 0;
 }
