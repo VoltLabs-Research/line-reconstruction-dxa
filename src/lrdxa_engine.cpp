@@ -176,25 +176,41 @@ void LineReconstructionDXAAlgorithm::run(
         && _structureAnalysis.clusterGraph().clusterTransitions().empty();
 
     if(skipComplementPasses) {
+        spdlog::info("Skipping edge vector completion: {} crystal without cluster transitions",
+            latticeStructureTypeName(_context.inputCrystalType));
         emitStage("skip_complement_edge_vectors");
     } else {
+        spdlog::info("Completing edge vectors around {} unresolved edges...", snapshot.unresolvedEdges);
+        const Stopwatch completionTimer;
+        const size_t unresolvedBeforeCompletion = snapshot.unresolvedEdges;
+        int iteration = 0;
         while(true) {
             bool changed = false;
+            const Stopwatch iterationTimer;
+            ++iteration;
 
             changed |= complementEdgeVectors(true);
             emitStage("complement_edge_vectors_forward");
 
-            dumpDislocationSnapshot(alpha);
+            const size_t unresolvedAfterForward = takeSnapshot().unresolvedEdges;
             emitStage("snapshot_after_forward_complement");
 
             changed |= complementEdgeVectors(false);
             emitStage("complement_edge_vectors_backward");
 
-            dumpDislocationSnapshot(alpha);
+            snapshot = takeSnapshot();
             emitStage("snapshot_after_backward_complement");
+
+            if(iteration <= 10 || iteration % 10 == 0) {
+                spdlog::info("  Iteration {}: {} unresolved edges after the forward pass, {} after the backward pass ({})",
+                    iteration, unresolvedAfterForward, snapshot.unresolvedEdges, iterationTimer.elapsed());
+            }
 
             if(!changed) break;
         }
+        spdlog::info("Edge vector completion converged after {} iteration{} in {}: {} edges recovered, {} still unresolved",
+            iteration, iteration == 1 ? "" : "s", completionTimer.elapsed(),
+            unresolvedBeforeCompletion - snapshot.unresolvedEdges, snapshot.unresolvedEdges);
     }
 
     stageTimer.restart();
@@ -514,9 +530,12 @@ void LineReconstructionDXAAlgorithm::assignIdealVectorsToEdges(int crystalPathSt
 }
 
 void LineReconstructionDXAAlgorithm::buildFacetLookupMap() {
+    const Stopwatch timer;
     _primaryFacetLookupMap.clear();
     _primaryFacetLookupMap.reserve(_unassignedEdges.size() * 6);
+    ProgressReporter progress("Indexing facets", _tessellation.numberOfTetrahedra());
     for(DelaunayTessellation::CellHandle cell : _tessellation.cells()) {
+        progress.update(cell + 1);
         if(!isFilledCell(cell)) {
             continue;
         }
@@ -544,6 +563,7 @@ void LineReconstructionDXAAlgorithm::buildFacetLookupMap() {
             _primaryFacetLookupMap.emplace(facetVertices, std::make_pair(cell, facet));
         }
     }
+    spdlog::info("Indexed {} facets with missing edge vectors in {}", _primaryFacetLookupMap.size(), timer.elapsed());
 }
 
 bool LineReconstructionDXAAlgorithm::complementEdgeVectors(bool forward) {
