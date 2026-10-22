@@ -294,10 +294,16 @@ void LineReconstructionDXAAlgorithm::classifyTetrahedra(double alpha) {
 }
 
 void LineReconstructionDXAAlgorithm::generateTessellationEdges() {
+    const Stopwatch timer;
+    size_t filledCellCount = 0;
+    size_t edgeCount = 0;
+    ProgressReporter progress("Generating tessellation edges", _tessellation.numberOfTetrahedra());
     for(DelaunayTessellation::CellHandle cell : _tessellation.cells()) {
+        progress.update(cell + 1);
         if(!isFilledCell(cell)) {
             continue;
         }
+        ++filledCellCount;
         const auto cellVertices = getCellVertices(_tessellation, cell);
         std::array<AtomIndex, 4> cellAtoms{};
         std::array<Point3, 4> cellPositions{};
@@ -322,11 +328,15 @@ void LineReconstructionDXAAlgorithm::generateTessellationEdges() {
             TessellationEdge* edge = _edgePool.construct(atom1, atom2, cell);
             edge->nextOutboundEdge = std::exchange(_atomOutboundEdges[atom1], edge);
             edge->nextInboundEdge = std::exchange(_atomInboundEdges[atom2], edge);
+            ++edgeCount;
         }
     }
+    spdlog::info("Generated {} tessellation edges from {} filled tetrahedra ({:.1f}% of primary) in {}",
+        edgeCount, filledCellCount, percentOf(filledCellCount, _tessellation.numberOfPrimaryTetrahedra()), timer.elapsed());
 }
 
 void LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
+    const Stopwatch timer;
     std::vector<AtomIndex> unassignedAtoms;
     for(AtomIndex atomIndex = 0; atomIndex < static_cast<AtomIndex>(_context.atomCount()); ++atomIndex) {
         Cluster* cluster = _structureAnalysis.atomCluster(atomIndex);
@@ -336,7 +346,10 @@ void LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
         }
     }
 
+    const size_t nonCrystallineAtoms = unassignedAtoms.size();
+    int passes = 0;
     while(!unassignedAtoms.empty()) {
+        ++passes;
         size_t remaining = 0;
         for(AtomIndex atomIndex : unassignedAtoms) {
             Cluster*& assignedCluster = _atomClusters[atomIndex];
@@ -367,6 +380,8 @@ void LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
         }
         unassignedAtoms.resize(remaining);
     }
+    spdlog::info("Assigned {} of {} non-crystalline atoms to a neighboring crystal cluster in {} ({} passes, {} left unassigned)",
+        nonCrystallineAtoms - unassignedAtoms.size(), nonCrystallineAtoms, timer.elapsed(), passes, unassignedAtoms.size());
 }
 
 void LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
@@ -422,10 +437,18 @@ void LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
 }
 
 void LineReconstructionDXAAlgorithm::assignIdealVectorsToEdges(int crystalPathSteps) {
+    spdlog::info("Assigning ideal lattice vectors to tessellation edges (crystal paths of up to {} steps)...", crystalPathSteps);
+    const Stopwatch timer;
     CrystalPathFinder pathFinder(_structureAnalysis, crystalPathSteps);
+    size_t edgeCount = 0;
+    size_t assignedCount = 0;
+    size_t unresolvedCount = 0;
 
+    ProgressReporter progress("Assigning ideal vectors", _atomOutboundEdges.size());
     for(size_t atomIndex = 0; atomIndex < _atomOutboundEdges.size(); ++atomIndex) {
+        progress.update(atomIndex + 1);
         for(TessellationEdge* edge = _atomOutboundEdges[atomIndex]; edge != nullptr; edge = edge->nextOutboundEdge) {
+            ++edgeCount;
             Cluster* cluster1 = clusterOfAtom(edge->atom1);
             Cluster* cluster2 = clusterOfAtom(edge->atom2);
             if(!cluster1 || !cluster2) {
@@ -442,11 +465,15 @@ void LineReconstructionDXAAlgorithm::assignIdealVectorsToEdges(int crystalPathSt
             if(idealVector.has_value() && idealVector->transformToCluster(cluster1, _structureAnalysis.clusterGraph())) {
                 edge->vector = *idealVector;
                 edge->hasEdgeVector = true;
+                ++assignedCount;
             } else {
                 _unassignedEdges.push_back(edge);
+                ++unresolvedCount;
             }
         }
     }
+    spdlog::info("Assigned ideal vectors to {} of {} edges in {}: {} unresolved, {} skipped (non-crystalline atom or no cluster transition)",
+        assignedCount, edgeCount, timer.elapsed(), unresolvedCount, edgeCount - assignedCount - unresolvedCount);
 }
 
 void LineReconstructionDXAAlgorithm::buildFacetLookupMap() {
