@@ -102,6 +102,7 @@ void LineReconstructionDXAAlgorithm::run(
     const LineReconstructionDXAOptions& options,
     const std::function<void(std::string_view)>& markStage
 ) {
+    const Stopwatch runTimer;
     const auto emitStage = [&](std::string_view stage) {
         if(markStage) {
             markStage(stage);
@@ -225,10 +226,12 @@ void LineReconstructionDXAAlgorithm::run(
     emitStage("finish_dislocation_lines");
 
     spdlog::info(
-        "line-reconstruction-dxa produced {} snapshot segments, {} stitched lines, {} unresolved edges",
-        _dislocationSegments.size(),
+        "Line reconstruction finished in {}: {} dislocation lines, {} snapshot segments and {} unresolved edge records over {} stages",
+        runTimer.elapsed(),
         _dislocationLines.size(),
-        _unassignedEdgesOutput.size()
+        _dislocationSegments.size(),
+        _unassignedEdgesOutput.size(),
+        _currentStage
     );
 }
 
@@ -869,6 +872,7 @@ void LineReconstructionDXAAlgorithm::appendDislocationSegmentSnapshot() {
 }
 
 void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
+    const Stopwatch timer;
     _dislocationLines.clear();
 
     struct TmpSegment {
@@ -909,7 +913,9 @@ void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
         return nodeId;
     };
 
+    ProgressReporter progress("Stitching dislocation lines", _tessellation.numberOfTetrahedra());
     for(DelaunayTessellation::CellHandle cell : _tessellation.cells()) {
+        progress.update(cell + 1);
         if(!isFilledCell(cell)) {
             continue;
         }
@@ -1172,7 +1178,7 @@ void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
     }
 
     if(tmpSegments.empty()) {
-        spdlog::info("stitchDislocationLines: no temporary segments to stitch");
+        spdlog::info("No dislocation segments to stitch ({})", timer.elapsed());
         return;
     }
 
@@ -1299,8 +1305,8 @@ void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
         }
     }
 
-    spdlog::info("stitchDislocationLines: {} lines ({} closed, {} open), total length {:.2f}, from {} segments with {} nodes",
-        _dislocationLines.size(), closedCount, openCount, totalLength, segCount, nodeCount);
+    spdlog::info("Stitched {} dislocation lines ({} closed, {} open), total length {:.2f}, from {} segments and {} nodes in {}",
+        _dislocationLines.size(), closedCount, openCount, totalLength, segCount, nodeCount, timer.elapsed());
     if(glideFilterCalls > 0) {
         spdlog::info("  FCC glide filter: {} cells checked, {} had glide edges, {} facets adjusted",
             glideFilterCalls, glideFilterHits, glideAdjustedFacets);
@@ -1308,6 +1314,7 @@ void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
 }
 
 void LineReconstructionDXAAlgorithm::finishDislocationLines(int smoothingLevel, double linePointInterval) {
+    const Stopwatch timer;
     for(auto& line : _dislocationLines) {
         line.burgersVector = ClusterVector(-line.burgersVector.localVec(), line.burgersVector.cluster());
     }
@@ -1439,11 +1446,12 @@ void LineReconstructionDXAAlgorithm::finishDislocationLines(int smoothingLevel, 
         finalLength += lineLength;
     }
     spdlog::info(
-        "finishDislocationLines: {} final lines ({} closed, {} open), total length {:.2f}",
+        "Finished {} dislocation lines ({} closed, {} open), final total length {:.2f}, in {}",
         _dislocationLines.size(),
         closedCount,
         static_cast<int>(_dislocationLines.size()) - closedCount,
-        finalLength
+        finalLength,
+        timer.elapsed()
     );
 }
 
@@ -1451,12 +1459,14 @@ void LineReconstructionDXAAlgorithm::classifyDislocationTypes() {
     constexpr double TOL = 0.01;
 
     int perfect = 0, shockley = 0, frank = 0, stairrod = 0, hirth = 0, other = 0;
+    int fccLines = 0;
 
     for(auto& line : _dislocationLines) {
         if(line.structureType != LATTICE_FCC) {
             other++;
             continue;
         }
+        fccLines++;
         const Vector3& b = line.burgersVector.localVec();
         double sqMag = b.x() * b.x() + b.y() * b.y() + b.z() * b.z();
 
@@ -1481,8 +1491,11 @@ void LineReconstructionDXAAlgorithm::classifyDislocationTypes() {
         }
     }
 
-    spdlog::info("FCC dislocation types: {} perfect, {} Shockley, {} Frank, {} stair-rod, {} Hirth, {} other",
-        perfect, shockley, frank, stairrod, hirth, other);
+    // Lines of non-FCC crystals all land in "other", so the breakdown says nothing without FCC lines.
+    if(fccLines > 0) {
+        spdlog::info("FCC dislocation types: {} perfect, {} Shockley, {} Frank, {} stair-rod, {} Hirth, {} other",
+            perfect, shockley, frank, stairrod, hirth, other);
+    }
 }
 
 void LineReconstructionDXAAlgorithm::appendUnassignedEdgeSnapshot() {
