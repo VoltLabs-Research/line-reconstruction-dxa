@@ -136,13 +136,40 @@ void LineReconstructionDXAAlgorithm::run(
     _interfaceMesh.clear();
     _currentStage = 0;
 
-    dumpDislocationSnapshot(alpha);
+    struct SnapshotCounts {
+        size_t segments;
+        size_t unresolvedEdges;
+        size_t interfaceFacets;
+    };
+    // Each snapshot appends its stage's complete set of segments, unresolved edges and interface
+    // facets, so the growth of each output is that stage's count.
+    const auto takeSnapshot = [&]() {
+        const size_t segments = _dislocationSegments.size();
+        const size_t edges = _unassignedEdgesOutput.size();
+        const size_t facets = _interfaceMesh.faceCount();
+        dumpDislocationSnapshot(alpha);
+        return SnapshotCounts{
+            _dislocationSegments.size() - segments,
+            _unassignedEdgesOutput.size() - edges,
+            _interfaceMesh.faceCount() - facets
+        };
+    };
+    const auto logStage = [&](const char* label, const SnapshotCounts& counts, const Stopwatch& timer) {
+        spdlog::info("Stage {} ({}): {} dislocation segments, {} unresolved edges, {} interface facets in {}",
+            _currentStage - 1, label, counts.segments, counts.unresolvedEdges, counts.interfaceFacets, timer.elapsed());
+    };
+
+    Stopwatch stageTimer;
+    SnapshotCounts snapshot = takeSnapshot();
+    logStage("initial mapping", snapshot, stageTimer);
     emitStage("snapshot_initial_mapping");
 
     eliminateSpuriousDislocationLoops();
     emitStage("eliminate_spurious_dislocation_loops");
 
-    dumpDislocationSnapshot(alpha);
+    stageTimer.restart();
+    snapshot = takeSnapshot();
+    logStage("after loop cleanup", snapshot, stageTimer);
     emitStage("snapshot_after_loop_cleanup");
 
     const bool skipComplementPasses = crystalUsesDirectTessellation(_context.inputCrystalType)
@@ -170,7 +197,9 @@ void LineReconstructionDXAAlgorithm::run(
         }
     }
 
-    dumpDislocationSnapshot(alpha);
+    stageTimer.restart();
+    snapshot = takeSnapshot();
+    logStage("final mapping", snapshot, stageTimer);
     emitStage("snapshot_final_mapping");
 
     stitchDislocationLines();
@@ -385,10 +414,15 @@ void LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
 }
 
 void LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
+    const Stopwatch timer;
     std::unordered_map<TessellationEdge*, int> compatibleCount;
     std::unordered_map<TessellationEdge*, int> incompatibleCount;
+    size_t mappedCells = 0;
+    size_t incompatibleCells = 0;
 
+    ProgressReporter progress("Checking elastic compatibility", _tessellation.numberOfTetrahedra());
     for(DelaunayTessellation::CellHandle cell : _tessellation.cells()) {
+        progress.update(cell + 1);
         if(!isFilledCell(cell)) {
             continue;
         }
@@ -406,6 +440,10 @@ void LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
         }
 
         bool compatible = isElasticMappingCompatible(cellEdges);
+        ++mappedCells;
+        if(!compatible) {
+            ++incompatibleCells;
+        }
 
         for(int i = 0; i < 6; ++i) {
             TessellationEdge* edge = cellEdges[i].undirectedEdge();
@@ -431,9 +469,8 @@ void LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
         invalidated++;
     }
 
-    if(invalidated > 0) {
-        spdlog::info("eliminateSpuriousDislocationLoops: invalidated {} edges", invalidated);
-    }
+    spdlog::info("Spurious loop elimination: invalidated {} edges ({} of {} fully mapped tetrahedra incompatible) in {}",
+        invalidated, incompatibleCells, mappedCells, timer.elapsed());
 }
 
 void LineReconstructionDXAAlgorithm::assignIdealVectorsToEdges(int crystalPathSteps) {
