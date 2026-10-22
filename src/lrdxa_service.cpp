@@ -1,15 +1,25 @@
 #include <volt/lrdxa_service.h>
 #include <volt/lrdxa_pipeline.h>
+#include <volt/core/progress.h>
 #include <volt/core/reconstructed_structure.h>
 #include <volt/analysis/structure_analysis.h>
 #include <spdlog/spdlog.h>
 #include <chrono>
+#include <filesystem>
 #include <utility>
 #include <string_view>
 
 namespace Volt {
 
 using namespace Volt::Particles;
+
+namespace {
+
+std::string fileNameOf(const std::string& path) {
+    return std::filesystem::path(path).filename().string();
+}
+
+}
 
 LineReconstructionDXA::LineReconstructionDXA()
     : _inputCrystalStructure(LATTICE_FCC)
@@ -104,6 +114,9 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
 
     StructureAnalysis structureAnalysis(context);
     std::string reconstructionError;
+    spdlog::info("Loading reconstructed structure for {} atoms ({}, {}, {})...",
+        frame.natoms, fileNameOf(_neighborLatticePath), fileNameOf(_clustersTablePath), fileNameOf(_clusterTransitionsPath));
+    const Stopwatch loadTimer;
     if(!ReconstructedStructureLoader::load(
         frame,
         _neighborLatticePath,
@@ -114,6 +127,12 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
     )) {
         return AnalysisResult::failure(reconstructionError);
     }
+    // clusters() includes the graph's built-in null cluster (id 0).
+    spdlog::info("Reconstructed structure loaded in {}: {} clusters, {} cluster transitions, max neighbor distance {:.3f}",
+        loadTimer.elapsed(),
+        structureAnalysis.clusterGraph().clusters().size() - 1,
+        structureAnalysis.clusterGraph().clusterTransitions().size(),
+        structureAnalysis.maximumNeighborDistance());
     markStage("load_reconstructed_structure");
 
     result = DXA::LineReconstructionDXAPipeline::run(
