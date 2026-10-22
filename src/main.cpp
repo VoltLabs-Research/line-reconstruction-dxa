@@ -21,7 +21,7 @@ LatticeStructureType parseCrystalStructure(const std::string& str) {
     if(str == "SC") return LATTICE_SC;
     if(str == "CUBIC_DIAMOND") return LATTICE_CUBIC_DIAMOND;
     if(str == "HEX_DIAMOND") return LATTICE_HEX_DIAMOND;
-    spdlog::warn("Unknown crystal structure '{}' , defaulting to FCC.", str);
+    spdlog::warn("Unknown crystal structure '{}', defaulting to FCC.", str);
     return LATTICE_FCC;
 }
 
@@ -110,6 +110,18 @@ int main(int argc, char* argv[]) {
     initLogging("line-reconstruction-dxa");
     spdlog::info("Using {} threads (OneTBB)", requestedThreads);
 
+    const std::string crystalStructure = getString(opts, "--crystalStructure", "FCC");
+    const int crystalPathSteps = getInt(opts, "--crystalPathSteps", 4);
+    const double tessellationGhostLayerScale = getDouble(opts, "--tessellationGhostLayerScale", 3.5);
+    const double alphaScale = getDouble(opts, "--alphaScale", 3.5);
+    const int smoothingIterations = getInt(opts, "--smoothingIterations", 0);
+    const double linePointInterval = getDouble(opts, "--linePointInterval", 1.2);
+    spdlog::info(
+        "Parameters: crystalStructure={}, crystalPathSteps={}, tessellationGhostLayerScale={}, alphaScale={}, "
+        "smoothingIterations={}, linePointInterval={}",
+        crystalStructure, crystalPathSteps, tessellationGhostLayerScale, alphaScale, smoothingIterations, linePointInterval
+    );
+
     const std::string latticeDirectory = getString(opts, "--lattice-dir", "");
     if(!latticeDirectory.empty()){
         setCrystalTopologySearchRoot(latticeDirectory);
@@ -126,12 +138,12 @@ int main(int argc, char* argv[]) {
     analyzer.setClustersTablePath(getString(opts, "--clusters-table"));
     analyzer.setClusterTransitionsPath(getString(opts, "--clusters-transitions"));
     analyzer.setNeighborLatticePath(getString(opts, "--neighbor_lattice"));
-    analyzer.setInputCrystalStructure(parseCrystalStructure(getString(opts, "--crystalStructure", "FCC")));
-    analyzer.setCrystalPathSteps(getInt(opts, "--crystalPathSteps", 4));
-    analyzer.setTessellationGhostLayerScale(getDouble(opts, "--tessellationGhostLayerScale", 3.5));
-    analyzer.setAlphaScale(getDouble(opts, "--alphaScale", 3.5));
-    analyzer.setSmoothingIterations(getInt(opts, "--smoothingIterations", 0));
-    analyzer.setLinePointInterval(getDouble(opts, "--linePointInterval", 1.2));
+    analyzer.setInputCrystalStructure(parseCrystalStructure(crystalStructure));
+    analyzer.setCrystalPathSteps(crystalPathSteps);
+    analyzer.setTessellationGhostLayerScale(tessellationGhostLayerScale);
+    analyzer.setAlphaScale(alphaScale);
+    analyzer.setSmoothingIterations(smoothingIterations);
+    analyzer.setLinePointInterval(linePointInterval);
 
     spdlog::info("Starting line reconstruction DXA analysis...");
     json result = analyzer.compute(frame, outputBase);
