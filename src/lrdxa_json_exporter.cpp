@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <volt/core/progress.h>
 #include <volt/helpers/dxa_serialization.h>
 #include <volt/structures/crystal_structure_types.h>
 #include <volt/utilities/json_utils.h>
@@ -227,8 +228,11 @@ json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const Str
         {"total_facets", static_cast<int>(exportFaces.size())}
     };
 
+    // One progress span over both JSON loops: they dominate the export of large meshes.
+    ProgressReporter progress("  Serializing interface mesh", exportPoints.size() + exportFaces.size());
     json points = json::array();
     for(size_t i = 0; i < exportPoints.size(); ++i) {
+        progress.update(i + 1);
         const auto& pos = exportPoints[i];
         points.push_back({
             {"index", static_cast<int>(i)},
@@ -238,6 +242,7 @@ json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const Str
 
     json facets = json::array();
     for(size_t faceIndex = 0; faceIndex < exportFaces.size(); ++faceIndex) {
+        progress.update(exportPoints.size() + faceIndex + 1);
         facets.push_back({
             {"vertices", exportFaces[faceIndex]},
             {"region", originalFaces[faceIndex] ? originalFaces[faceIndex]->region : 0}
