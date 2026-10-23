@@ -32,13 +32,27 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release MinSizeRel RelWithDebInfo)
 
-find_package(coretoolkit REQUIRED)
-find_package(structure-identification REQUIRED)
-find_package(opendxa REQUIRED)
-find_package(spdlog REQUIRED)
-find_package(nlohmann_json REQUIRED)
-find_package(Boost REQUIRED)
-find_package(TBB REQUIRED)
+if(NOT TARGET coretoolkit::coretoolkit)
+    find_package(coretoolkit REQUIRED)
+endif()
+if(NOT TARGET structure-identification::structure-identification)
+    find_package(structure-identification REQUIRED)
+endif()
+if(NOT TARGET opendxa::opendxa)
+    find_package(opendxa REQUIRED)
+endif()
+if(NOT TARGET spdlog::spdlog)
+    find_package(spdlog REQUIRED)
+endif()
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    find_package(nlohmann_json REQUIRED)
+endif()
+if(NOT TARGET Boost::headers AND NOT TARGET Boost::boost AND NOT TARGET boost::headers AND NOT TARGET boost::boost)
+    find_package(Boost REQUIRED)
+endif()
+if(NOT EMSCRIPTEN AND NOT TARGET TBB::tbb)
+    find_package(TBB REQUIRED)
+endif()
 
 set(LRDXA_BOOST_TARGET "")
 if(TARGET Boost::headers)
@@ -53,18 +67,18 @@ else()
     message(FATAL_ERROR "LineReconstructionDXA requires a Boost headers target")
 endif()
 
-file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.cpp)
+file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 list(FILTER LIB_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
 
 add_library(${PROJECT_NAME}_lib STATIC ${LIB_SOURCES})
 set_target_properties(${PROJECT_NAME}_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-target_include_directories(${PROJECT_NAME}_lib PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(${PROJECT_NAME}_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_precompile_headers(${PROJECT_NAME}_lib PRIVATE <volt/core/volt.h>)
-target_link_libraries(${PROJECT_NAME}_lib PUBLIC
-    ${LRDXA_BOOST_TARGET}
-    TBB::tbb
-)
+target_link_libraries(${PROJECT_NAME}_lib PUBLIC ${LRDXA_BOOST_TARGET})
+if(NOT EMSCRIPTEN)
+    target_link_libraries(${PROJECT_NAME}_lib PUBLIC TBB::tbb)
+endif()
 target_link_libraries(${PROJECT_NAME}_lib PRIVATE
     opendxa::opendxa
     coretoolkit::coretoolkit
@@ -73,8 +87,8 @@ target_link_libraries(${PROJECT_NAME}_lib PRIVATE
     nlohmann_json::nlohmann_json
 )
 
-add_executable(${PROJECT_NAME} ${CMAKE_SOURCE_DIR}/src/main.cpp)
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_precompile_headers(${PROJECT_NAME} PRIVATE <volt/core/volt.h>)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -85,7 +99,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     spdlog::spdlog
     nlohmann_json::nlohmann_json
 )
+if(EMSCRIPTEN)
+    volt_wasm_program(${PROJECT_NAME})
+endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 install(TARGETS ${PROJECT_NAME}_lib DESTINATION lib)
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include)
