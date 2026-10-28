@@ -99,7 +99,8 @@
                                 "plugins": [
                                     "polyhedral-template-matching",
                                     "adaptive-common-neighbor-analysis",
-                                    "pattern-structure-matching"
+                                    "pattern-structure-matching",
+                                    "cnat"
                                 ]
                             },
                             {
@@ -110,7 +111,8 @@
                                 "plugins": [
                                     "polyhedral-template-matching",
                                     "adaptive-common-neighbor-analysis",
-                                    "pattern-structure-matching"
+                                    "pattern-structure-matching",
+                                    "cnat"
                                 ]
                             },
                             {
@@ -121,7 +123,8 @@
                                 "plugins": [
                                     "polyhedral-template-matching",
                                     "adaptive-common-neighbor-analysis",
-                                    "pattern-structure-matching"
+                                    "pattern-structure-matching",
+                                    "cnat"
                                 ]
                             }
                         ]
