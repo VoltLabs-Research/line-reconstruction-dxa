@@ -109,28 +109,41 @@ void LineReconstructionDXAAlgorithm::run(
         }
     };
 
+    // Selecting tessellation vertices, Delaunay tessellation, classifying tetrahedra, tessellation
+    // edges, cluster assignment, ideal vectors, facet index, initial snapshot, loop cleanup and its
+    // snapshot, edge vector completion, final snapshot, stitching and finishing the lines, weighed
+    // by the stage times of sample runs.
+    ProgressSteps steps({0.1, 2.0, 0.1, 1.0, 0.1, 1.6, 2.0, 4.0, 1.4, 4.0, 12.0, 4.0, 2.0, 0.1});
+    JobProgress::instance().setText("Marking perfect crystalline regions");
     markPerfectCrystallineRegions();
     emitStage("mark_perfect_crystalline_regions");
+    steps.next("Building the Delaunay tessellation");
 
     const double ghostLayerSize = options.tessellationGhostLayerScale * _structureAnalysis.maximumNeighborDistance();
     buildTessellation(ghostLayerSize);
     emitStage("delaunay_tessellation");
+    steps.next("Classifying tetrahedra");
 
     const double alpha = options.alphaScale * _structureAnalysis.maximumNeighborDistance();
     classifyTetrahedra(alpha);
     emitStage("classify_tetrahedra");
+    steps.next("Building tessellation edges");
 
     generateTessellationEdges();
     emitStage("generate_tessellation_edges");
+    steps.next("Assigning atoms to clusters");
 
     assignAtomsToClusters();
     emitStage("assign_atoms_to_clusters");
+    steps.next("Assigning ideal vectors to edges");
 
     assignIdealVectorsToEdges(options.crystalPathSteps);
     emitStage("assign_ideal_vectors_to_edges");
+    steps.next("Building the facet index");
 
     buildFacetLookupMap();
     emitStage("build_facet_lookup_map");
+    steps.next("Mapping the initial dislocation network");
 
     _dislocationSegments.clear();
     _unassignedEdgesOutput.clear();
@@ -164,14 +177,17 @@ void LineReconstructionDXAAlgorithm::run(
     SnapshotCounts snapshot = takeSnapshot();
     logStage("initial mapping", snapshot, stageTimer);
     emitStage("snapshot_initial_mapping");
+    steps.next("Eliminating spurious dislocation loops");
 
     eliminateSpuriousDislocationLoops();
     emitStage("eliminate_spurious_dislocation_loops");
+    steps.next("Mapping after the loop cleanup");
 
     stageTimer.restart();
     snapshot = takeSnapshot();
     logStage("after loop cleanup", snapshot, stageTimer);
     emitStage("snapshot_after_loop_cleanup");
+    steps.next("Completing edge vectors");
 
     const bool skipComplementPasses = crystalUsesDirectTessellation(_context.inputCrystalType)
         && _structureAnalysis.clusterGraph().clusterTransitions().empty();
@@ -213,14 +229,17 @@ void LineReconstructionDXAAlgorithm::run(
             iteration, iteration == 1 ? "" : "s", completionTimer.elapsed(),
             unresolvedBeforeCompletion - snapshot.unresolvedEdges, snapshot.unresolvedEdges);
     }
+    steps.next("Mapping the final dislocation network");
 
     stageTimer.restart();
     snapshot = takeSnapshot();
     logStage("final mapping", snapshot, stageTimer);
     emitStage("snapshot_final_mapping");
+    steps.next("Stitching dislocation lines");
 
     stitchDislocationLines();
     emitStage("stitch_dislocation_lines");
+    steps.next("Finishing dislocation lines");
 
     finishDislocationLines(options.smoothingIterations, options.linePointInterval);
     emitStage("finish_dislocation_lines");

@@ -10,7 +10,7 @@ class LineReconstructionDXAConan(ConanFile):
     settings = "os", "arch", "compiler", "build_type"
     requires = (
         "opendxa/[>=2.0]",
-        "coretoolkit/[>=2.5]",
+        "coretoolkit/[>=2.8]",
         "structure-identification/[>=2.1]",
         "common-neighbor-analysis/[>=2.0]",
         "polyhedral-template-matching/[>=2.0]",

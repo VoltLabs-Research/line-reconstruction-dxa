@@ -384,7 +384,11 @@ void LineReconstructionJsonExporter::writeInterfaceMeshParquetToFile(
     const StructureAnalysis& structureAnalysis,
     const std::string& filePath
 ) {
-    JsonUtils::writeJsonToParquet(getMeshData(mesh, structureAnalysis), filePath, false);
+    // Serializing the mesh, then writing it as parquet, about equally long on a sample run.
+    ProgressSteps steps({1.0, 1.0});
+    const json meshData = getMeshData(mesh, structureAnalysis);
+    steps.next();
+    JsonUtils::writeJsonToParquet(meshData, filePath, false);
 }
 
 json LineReconstructionJsonExporter::vectorToJson(const Vector3& vector) {

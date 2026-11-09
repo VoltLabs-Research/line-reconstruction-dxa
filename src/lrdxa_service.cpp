@@ -114,6 +114,9 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
 
     StructureAnalysis structureAnalysis(context);
     std::string reconstructionError;
+    // Loading the reconstructed structure, then the line reconstruction and its outputs.
+    ProgressSteps steps({1.0, 20.0});
+    JobProgress::instance().setText("Loading the reconstructed structure");
     spdlog::info("Loading reconstructed structure for {} atoms ({}, {}, {})...",
         frame.natoms, fileNameOf(_neighborLatticePath), fileNameOf(_clustersTablePath), fileNameOf(_clusterTransitionsPath));
     const Stopwatch loadTimer;
@@ -134,6 +137,7 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
         structureAnalysis.clusterGraph().clusterTransitions().size(),
         structureAnalysis.maximumNeighborDistance());
     markStage("load_reconstructed_structure");
+    steps.next("Reconstructing dislocation lines");
 
     result = DXA::LineReconstructionDXAPipeline::run(
         frame,

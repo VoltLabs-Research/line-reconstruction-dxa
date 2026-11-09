@@ -132,11 +132,16 @@ int main(int argc, char* argv[]) {
         spdlog::info("Using lattice directory: {}", latticeDirectory);
     }
 
+    // Reading the input, then the analysis, the steps pluginMain takes for every other plugin.
+    JobProgress& progress = JobProgress::instance();
+    progress.beginInput();
+
     LammpsParser::Frame frame;
     if(!parseFrame(filename, frame)) return 1;
 
     outputBase = deriveOutputBase(filename, outputBase);
     spdlog::info("Output base: {}", outputBase);
+    progress.beginAnalysis(descriptor.description);
 
     LineReconstructionDXAService analyzer;
     analyzer.setClustersTablePath(getString(opts, "--clusters-table"));
@@ -156,5 +161,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     spdlog::info("Line Reconstruction DXA completed in {}.", runTimer.elapsed());
+    progress.finish();
     return 0;
 }
