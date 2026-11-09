@@ -19,7 +19,12 @@ json LineReconstructionDXAPipeline::run(
     const std::function<void(std::string_view)>& markStage
 ) {
     LineReconstructionDXAAlgorithm algorithm(reconstructionStructureAnalysis, reconstructionContext);
+    // Line reconstruction, then the dislocations, snapshot segments, unresolved edges, interface
+    // mesh and simulation cell outputs (none without an output path), weighed by a sample run.
+    const double writes = outputFile.empty() ? 0.0 : 1.0;
+    ProgressSteps steps({16.0, 0.1 * writes, 0.8 * writes, 0.1 * writes, 6.0 * writes, 0.1 * writes});
     algorithm.run(options, markStage);
+    steps.next("Writing dislocations");
 
     if(!outputFile.empty()) {
         Stopwatch exportTimer;
@@ -32,6 +37,7 @@ json LineReconstructionDXAPipeline::run(
         spdlog::info("Exported {} dislocation lines to: {} ({})",
             algorithm.dislocationLineCount(), dislocationsPath, exportTimer.elapsed());
         if(markStage) markStage("stream_dislocations_parquet");
+        steps.next("Writing dislocation segments");
         exportTimer.restart();
         const std::string segmentsPath = outputFile + "_dislocation_segments.parquet";
         jsonExporter.writeLineSegmentsParquetToFile(
@@ -42,6 +48,7 @@ json LineReconstructionDXAPipeline::run(
         spdlog::info("Exported {} snapshot segments to: {} ({})",
             algorithm.dislocationSegments().size(), segmentsPath, exportTimer.elapsed());
         if(markStage) markStage("stream_dislocation_segments_parquet");
+        steps.next("Writing unassigned edges");
         exportTimer.restart();
         const std::string unassignedEdgesPath = outputFile + "_unassigned_edges.parquet";
         jsonExporter.writeUnassignedEdgesParquetToFile(
@@ -51,6 +58,7 @@ json LineReconstructionDXAPipeline::run(
         spdlog::info("Exported {} unresolved edge records to: {} ({})",
             algorithm.unassignedEdges().size(), unassignedEdgesPath, exportTimer.elapsed());
         if(markStage) markStage("stream_unassigned_edges_parquet");
+        steps.next("Writing the interface mesh");
         spdlog::info("Exporting interface mesh ({} facets, {} vertices)...",
             algorithm.interfaceMesh().faceCount(), algorithm.interfaceMesh().vertexCount());
         exportTimer.restart();
@@ -62,6 +70,7 @@ json LineReconstructionDXAPipeline::run(
         );
         spdlog::info("Exported interface mesh to: {} ({})", interfaceMeshPath, exportTimer.elapsed());
         if(markStage) markStage("stream_interface_mesh_parquet");
+        steps.next("Writing the simulation cell");
         exportTimer.restart();
         const std::string simulationCellPath = outputFile + "_simulation_cell.parquet";
         const auto simCellInfo = jsonExporter.getExtendedSimulationCellInfo(frame.simulationCell);
