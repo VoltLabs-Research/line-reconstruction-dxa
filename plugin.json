@@ -12,6 +12,7 @@
                     "modifier": {
                         "name": "Line Reconstruction DXA",
                         "key": "line-reconstruction-dxa",
+                        "category": "Defects",
                         "icon": "HiCube",
                         "author": "Rodolfo Herrera",
                         "license": "MIT",
