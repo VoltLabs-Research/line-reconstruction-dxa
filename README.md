@@ -5,6 +5,7 @@ Reconstructs dislocation lines via DXA from upstream cluster tables and neighbor
 ## Install
 
 ```bash
+npm install -g @voltstack/vpm
 vpm install @voltlabs/line-reconstruction-dxa
 ```
 
