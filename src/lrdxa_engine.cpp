@@ -655,7 +655,7 @@ std::array<bool, 6> LineReconstructionDXAAlgorithm::determineConservativeGlideEd
     const Vector3& normal = FCC_SLIP_PLANE_NORMALS[consensusPlane - 1];
     for(int e = 0; e < 6; ++e) {
         if(!cellEdges[e] || !cellEdges[e].hasEdgeVector()) continue;
-        const Vector3& ev = cellEdges[e].vector().localVec();
+        const Vector3 ev = cellEdges[e].vector().localVec();
         double dot = ev.x() * normal.x() + ev.y() * normal.y() + ev.z() * normal.z();
         if(std::abs(dot) < TOLERANCE) {
             result[e] = true;
