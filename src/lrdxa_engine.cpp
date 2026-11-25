@@ -547,6 +547,8 @@ bool LineReconstructionDXAAlgorithm::complementEdgeVectors(bool forward) {
             OrientedEdge secondaryCandidate;
             visitEdgeIncidentFacets(edge, [&](DelaunayTessellation::CellHandle cell, int facet) {
                 std::array<OrientedEdge, 3> facetEdges = getFacetCircuitEdges(cell, facet);
+                // A degenerate filled cell can lack the wrapped edges that generateTessellationEdges skips.
+                if(!facetEdges[0] || !facetEdges[1] || !facetEdges[2]) return;
                 int rotations = 0;
                 while(facetEdges[0].atom2() != edge->atom1 && rotations < 3) {
                     std::rotate(facetEdges.begin(), facetEdges.begin() + 1, facetEdges.end());
