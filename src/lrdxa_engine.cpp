@@ -308,8 +308,8 @@ ClusterAssignment LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
 }
 
 SpuriousLoopElimination LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
-    std::unordered_map<TessellationEdge*, int> compatibleCount;
-    std::unordered_map<TessellationEdge*, int> incompatibleCount;
+    std::unordered_set<TessellationEdge*> compatibleEdges;
+    std::unordered_set<TessellationEdge*> incompatibleEdges;
     size_t mappedCells = 0;
     size_t incompatibleCells = 0;
 
@@ -342,24 +342,25 @@ SpuriousLoopElimination LineReconstructionDXAAlgorithm::eliminateSpuriousDisloca
             TessellationEdge* edge = cellEdges[i].undirectedEdge();
             if(!edge) continue;
             if(compatible) {
-                compatibleCount[edge]++;
+                compatibleEdges.insert(edge);
             } else {
-                incompatibleCount[edge]++;
+                incompatibleEdges.insert(edge);
             }
         }
     }
 
+    // In atom order, as assignIdealVectorsToEdges queued the unresolved edges: the order of the sets follows the edge
+    // addresses, which change from run to run.
     int invalidated = 0;
-    for(auto& [edge, incompat] : incompatibleCount) {
-        if(compatibleCount.count(edge) > 0) {
-            continue;
+    for(TessellationEdge* atomEdges : _atomOutboundEdges) {
+        for(TessellationEdge* edge = atomEdges; edge != nullptr; edge = edge->nextOutboundEdge) {
+            if(!edge->hasEdgeVector || !incompatibleEdges.contains(edge) || compatibleEdges.contains(edge)) {
+                continue;
+            }
+            edge->hasEdgeVector = false;
+            _unassignedEdges.push_back(edge);
+            invalidated++;
         }
-        if(!edge->hasEdgeVector) {
-            continue;
-        }
-        edge->hasEdgeVector = false;
-        _unassignedEdges.push_back(edge);
-        invalidated++;
     }
 
     return SpuriousLoopElimination{invalidated, incompatibleCells, mappedCells};
