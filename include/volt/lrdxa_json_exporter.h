@@ -49,6 +49,7 @@ private:
     json vectorToJson(const Vector3& vector);
     json affineTransformationToJson(const AffineTransformation& transform);
     json simulationCellToJson(const SimulationCell& cell);
+    static json wrapSimulationCellInfoJson(const SimulationCell& cell, json&& cellJson);
     double calculateAngle(const Vector3& a, const Vector3& b);
 };
 

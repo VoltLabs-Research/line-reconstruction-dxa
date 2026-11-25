@@ -4,236 +4,37 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <functional>
-#include <limits>
 #include <volt/core/progress.h>
 #include <volt/helpers/dxa_serialization.h>
+#include <volt/helpers/dxa_serialization_detail.h>
 #include <volt/structures/crystal_structure_types.h>
 #include <volt/utilities/json_utils.h>
 #include <volt/utilities/parquet_line_writer.h>
 
 namespace Volt {
 
-namespace {
-
-Vector3 getGlobalBurgersVector(const ClusterVector& burgersVector) {
-    if(burgersVector.cluster() == nullptr) {
-        return burgersVector.localVec();
-    }
-    return burgersVector.toSpatialVector();
-}
-
-json wrapSimulationCellInfoJson(const SimulationCell& cell, json&& cellJson) {
-    const auto& pbcFlags = cell.pbcFlags();
-    const Vector3 a = cell.matrix().column(0);
-    const Vector3 b = cell.matrix().column(1);
-    const Vector3 c = cell.matrix().column(2);
-    json cellListing = json::array({
-        json{
-            {"volume", cell.volume3D()},
-            {"is_2d", cell.is2D()},
-            {"effective_dimensions", cell.is2D() ? 2 : 3},
-            {"a_x", a.x()},
-            {"a_y", a.y()},
-            {"a_z", a.z()},
-            {"b_x", b.x()},
-            {"b_y", b.y()},
-            {"b_z", b.z()},
-            {"c_x", c.x()},
-            {"c_y", c.y()},
-            {"c_z", c.z()},
-            {"a_length", a.length()},
-            {"b_length", b.length()},
-            {"c_length", c.length()},
-            {"pbc_x", pbcFlags[0]},
-            {"pbc_y", pbcFlags[1]},
-            {"pbc_z", pbcFlags[2]}
-        }
-    });
-    return {
-        {"export", {{"SimulationCellExporter", {{"simulation_cell", cellJson}}}}},
-        {"main_listing", {
-            {"simulation_cells", 1},
-            {"volume", cell.volume3D()},
-            {"is_2d", cell.is2D()},
-            {"effective_dimensions", cell.is2D() ? 2 : 3},
-            {"periodic_dimensions", static_cast<int>(pbcFlags[0]) + static_cast<int>(pbcFlags[1]) + static_cast<int>(pbcFlags[2])}
-        }},
-        {"sub_listings", {{"simulation_cell", std::move(cellListing)}}}
-    };
-}
-
-void clipDislocationLine(
-    const std::vector<Point3>& line,
-    const SimulationCell& simulationCell,
-    const std::function<void(const Point3&, const Point3&, bool)>& segmentCallback
-) {
-    if(line.size() < 2) return;
-    bool isInitialSegment = true;
-
-    auto v1Iter = line.cbegin();
-    Point3 rp1 = simulationCell.absoluteToReduced(*v1Iter);
-    Vector3 shiftVector = Vector3::Zero();
-    for(size_t dimension = 0; dimension < 3; ++dimension) {
-        if(simulationCell.pbcFlags()[dimension]) {
-            const double shift = -std::floor(rp1[dimension]);
-            rp1[dimension] += shift;
-            shiftVector[dimension] += shift;
-        }
-    }
-
-    for(auto v2Iter = v1Iter + 1; v2Iter != line.cend(); v1Iter = v2Iter, ++v2Iter) {
-        Point3 rp2 = simulationCell.absoluteToReduced(*v2Iter) + shiftVector;
-        int iterationCount = 0;
-        while(true) {
-            if(++iterationCount > 10) {
-                segmentCallback(
-                    simulationCell.reducedToAbsolute(rp1),
-                    simulationCell.reducedToAbsolute(rp2),
-                    isInitialSegment
-                );
-                break;
-            }
-
-            size_t crossDim = static_cast<size_t>(-1);
-            double crossDir = 0.0;
-            double smallestT = std::numeric_limits<double>::max();
-            for(size_t dimension = 0; dimension < 3; ++dimension) {
-                if(!simulationCell.pbcFlags()[dimension]) continue;
-                const int d = static_cast<int>(std::floor(rp2[dimension])) - static_cast<int>(std::floor(rp1[dimension]));
-                if(d == 0) continue;
-                const double dr = rp2[dimension] - rp1[dimension];
-                if(std::abs(dr) < 1e-9) continue;
-                const double t = (d > 0)
-                    ? (std::ceil(rp1[dimension]) - rp1[dimension]) / dr
-                    : (std::floor(rp1[dimension]) - rp1[dimension]) / dr;
-                if(t > 1e-9 && t < smallestT) {
-                    smallestT = t;
-                    crossDim = dimension;
-                    crossDir = (d > 0) ? 1.0 : -1.0;
-                }
-            }
-
-            if(smallestT < (1.0 - 1e-9)) {
-                Point3 intersection = rp1 + smallestT * (rp2 - rp1);
-                intersection[crossDim] = std::round(intersection[crossDim]);
-                segmentCallback(
-                    simulationCell.reducedToAbsolute(rp1),
-                    simulationCell.reducedToAbsolute(intersection),
-                    isInitialSegment
-                );
-                shiftVector[crossDim] -= crossDir;
-                rp1 = intersection;
-                rp1[crossDim] -= crossDir;
-                rp2[crossDim] -= crossDir;
-                isInitialSegment = true;
-            } else {
-                segmentCallback(
-                    simulationCell.reducedToAbsolute(rp1),
-                    simulationCell.reducedToAbsolute(rp2),
-                    isInitialSegment
-                );
-                isInitialSegment = false;
-                break;
-            }
-        }
-        rp1 = rp2;
-    }
-}
-
-double polylineLength(const std::vector<Point3>& points) {
-    double length = 0.0;
-    for(size_t i = 1; i < points.size(); ++i) {
-        length += (points[i] - points[i - 1]).length();
-    }
-    return length;
-}
-
-// Splits a polyline into PBC-clipped chunks and hands each renderable chunk
-// (>= 2 points) to emit().
-void forEachClippedChunk(
-    const std::vector<Point3>& points,
-    const SimulationCell* simulationCell,
-    const std::function<void(std::vector<Point3>&&)>& emit
-) {
-    if(!simulationCell) {
-        if(points.size() >= 2) emit(std::vector<Point3>(points));
-        return;
-    }
-
-    std::vector<Point3> currentChunk;
-    clipDislocationLine(points, *simulationCell, [&](const Point3& p1, const Point3& p2, bool isInitialSegment) {
-        if(isInitialSegment && !currentChunk.empty()) {
-            if(currentChunk.size() >= 2) emit(std::move(currentChunk));
-            currentChunk.clear();
-        }
-        if(currentChunk.empty()) {
-            currentChunk.push_back(p1);
-        }
-        currentChunk.push_back(p2);
-    });
-    if(currentChunk.size() >= 2) emit(std::move(currentChunk));
-}
-
-}
+using DxaSerialization::Detail::getGlobalBurgersVector;
+using DxaSerialization::Detail::polylineLength;
+using DxaSerialization::Detail::UnwrappedMesh;
+using DxaSerialization::Detail::unwrapFaces;
 
 template <typename MeshType>
 json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const StructureAnalysis& structureAnalysis) {
     json meshData;
-    const auto& originalVertices = mesh.vertices();
     const auto& originalFaces = mesh.faces();
-    const auto& cell = structureAnalysis.context().simCell;
-
-    std::vector<Point3> exportPoints;
-    exportPoints.reserve(originalVertices.size());
-    std::vector<int> originalToExportVertexMap(originalVertices.size());
-    for(size_t i = 0; i < originalVertices.size(); ++i) {
-        exportPoints.push_back(originalVertices[i]->pos());
-        originalToExportVertexMap[i] = static_cast<int>(i);
-    }
-
-    std::vector<std::vector<int>> exportFaces;
-    exportFaces.reserve(originalFaces.size());
-    for(const auto* face : originalFaces) {
-        if(!face || !face->edges()) continue;
-        std::vector<int> faceVertexIndices;
-        std::vector<Point3> faceVertexPositions;
-        auto* startEdge = face->edges();
-        auto* currentEdge = startEdge;
-        do {
-            faceVertexIndices.push_back(currentEdge->vertex1()->index());
-            faceVertexPositions.push_back(currentEdge->vertex1()->pos());
-            currentEdge = currentEdge->nextFaceEdge();
-        } while(currentEdge != startEdge);
-
-        cell.unwrapPositions(faceVertexPositions.data(), faceVertexPositions.size());
-
-        std::vector<int> newFaceIndices;
-        for(size_t i = 0; i < faceVertexIndices.size(); ++i) {
-            const int originalIndex = faceVertexIndices[i];
-            const Point3& originalPos = originalVertices[originalIndex]->pos();
-            const Point3& unwrappedPos = faceVertexPositions[i];
-            if(!originalPos.equals(unwrappedPos, 1e-6)) {
-                newFaceIndices.push_back(static_cast<int>(exportPoints.size()));
-                exportPoints.push_back(unwrappedPos);
-            } else {
-                newFaceIndices.push_back(originalToExportVertexMap[originalIndex]);
-            }
-        }
-        exportFaces.push_back(std::move(newFaceIndices));
-    }
+    const UnwrappedMesh unwrapped = unwrapFaces(mesh, structureAnalysis.context().simCell);
 
     meshData["main_listing"] = {
-        {"total_nodes", static_cast<int>(exportPoints.size())},
-        {"total_facets", static_cast<int>(exportFaces.size())}
+        {"total_nodes", static_cast<int>(unwrapped.points.size())},
+        {"total_facets", static_cast<int>(unwrapped.faces.size())}
     };
 
     // One progress span over both JSON loops: they dominate the export of large meshes.
-    ProgressReporter progress("  Serializing interface mesh", exportPoints.size() + exportFaces.size());
+    ProgressReporter progress("  Serializing interface mesh", unwrapped.points.size() + unwrapped.faces.size());
     json points = json::array();
-    for(size_t i = 0; i < exportPoints.size(); ++i) {
+    for(size_t i = 0; i < unwrapped.points.size(); ++i) {
         progress.update(i + 1);
-        const auto& pos = exportPoints[i];
+        const auto& pos = unwrapped.points[i];
         points.push_back({
             {"index", static_cast<int>(i)},
             {"position", {pos.x(), pos.y(), pos.z()}}
@@ -241,10 +42,10 @@ json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const Str
     }
 
     json facets = json::array();
-    for(size_t faceIndex = 0; faceIndex < exportFaces.size(); ++faceIndex) {
-        progress.update(exportPoints.size() + faceIndex + 1);
+    for(size_t faceIndex = 0; faceIndex < unwrapped.faces.size(); ++faceIndex) {
+        progress.update(unwrapped.points.size() + faceIndex + 1);
         facets.push_back({
-            {"vertices", exportFaces[faceIndex]},
+            {"vertices", unwrapped.faces[faceIndex]},
             {"region", originalFaces[faceIndex] ? originalFaces[faceIndex]->region : 0}
         });
     }
@@ -271,14 +72,10 @@ void LineReconstructionJsonExporter::writeLineSegmentsParquetToFile(
     std::vector<Row> rows;
     rows.reserve(segments.size());
     for(const auto& segment : segments) {
-        forEachClippedChunk(
-            {segment.position1, segment.position2},
-            &simulationCell,
-            [&](std::vector<Point3>&& points) {
-                const double length = polylineLength(points);
-                rows.push_back({std::move(points), length, &segment});
-            }
-        );
+        for(auto& points : DxaSerialization::splitAtPeriodicBoundaries({segment.position1, segment.position2}, simulationCell)) {
+            const double length = polylineLength(points);
+            rows.push_back({std::move(points), length, &segment});
+        }
     }
 
     streamLinesToParquet(
@@ -319,10 +116,10 @@ void LineReconstructionJsonExporter::writeDislocationLinesParquetToFile(
     std::vector<Row> rows;
     rows.reserve(lines.size());
     for(const auto& line : lines) {
-        forEachClippedChunk(line.points, &simulationCell, [&](std::vector<Point3>&& points) {
+        for(auto& points : DxaSerialization::splitAtPeriodicBoundaries(line.points, simulationCell)) {
             const double length = polylineLength(points);
             rows.push_back({std::move(points), length, &line});
-        });
+        }
     }
 
     streamLinesToParquet(
@@ -384,8 +181,11 @@ void LineReconstructionJsonExporter::writeInterfaceMeshParquetToFile(
     const StructureAnalysis& structureAnalysis,
     const std::string& filePath
 ) {
-    // Serializing the mesh, then writing it as parquet, about equally long on a sample run.
-    ProgressSteps steps({1.0, 1.0});
+    // The two take about equally long on a sample run.
+    ProgressSteps steps({
+        {"Serializing the interface mesh", 1.0},
+        {"Writing the interface mesh to Parquet", 1.0},
+    });
     const json meshData = getMeshData(mesh, structureAnalysis);
     steps.next();
     JsonUtils::writeJsonToParquet(meshData, filePath, false);
@@ -453,6 +253,46 @@ json LineReconstructionJsonExporter::getExtendedSimulationCellInfo(const Simulat
         {"effective_dimensions", cell.is2D() ? 2 : 3}
     };
     return wrapSimulationCellInfoJson(cell, std::move(cellJson));
+}
+
+json LineReconstructionJsonExporter::wrapSimulationCellInfoJson(const SimulationCell& cell, json&& cellJson) {
+    const auto& pbcFlags = cell.pbcFlags();
+    const Vector3 a = cell.matrix().column(0);
+    const Vector3 b = cell.matrix().column(1);
+    const Vector3 c = cell.matrix().column(2);
+    json cellListing = json::array({
+        json{
+            {"volume", cell.volume3D()},
+            {"is_2d", cell.is2D()},
+            {"effective_dimensions", cell.is2D() ? 2 : 3},
+            {"a_x", a.x()},
+            {"a_y", a.y()},
+            {"a_z", a.z()},
+            {"b_x", b.x()},
+            {"b_y", b.y()},
+            {"b_z", b.z()},
+            {"c_x", c.x()},
+            {"c_y", c.y()},
+            {"c_z", c.z()},
+            {"a_length", a.length()},
+            {"b_length", b.length()},
+            {"c_length", c.length()},
+            {"pbc_x", pbcFlags[0]},
+            {"pbc_y", pbcFlags[1]},
+            {"pbc_z", pbcFlags[2]}
+        }
+    });
+    return {
+        {"export", {{"SimulationCellExporter", {{"simulation_cell", cellJson}}}}},
+        {"main_listing", {
+            {"simulation_cells", 1},
+            {"volume", cell.volume3D()},
+            {"is_2d", cell.is2D()},
+            {"effective_dimensions", cell.is2D() ? 2 : 3},
+            {"periodic_dimensions", static_cast<int>(pbcFlags[0]) + static_cast<int>(pbcFlags[1]) + static_cast<int>(pbcFlags[2])}
+        }},
+        {"sub_listings", {{"simulation_cell", std::move(cellListing)}}}
+    };
 }
 
 double LineReconstructionJsonExporter::calculateAngle(const Vector3& a, const Vector3& b) {

@@ -1,25 +1,14 @@
 #include <volt/lrdxa_service.h>
+#include <volt/lrdxa_log.h>
 #include <volt/lrdxa_pipeline.h>
 #include <volt/core/progress.h>
 #include <volt/core/reconstructed_structure.h>
 #include <volt/analysis/structure_analysis.h>
-#include <spdlog/spdlog.h>
-#include <chrono>
-#include <filesystem>
 #include <utility>
-#include <string_view>
 
 namespace Volt {
 
 using namespace Volt::Particles;
-
-namespace {
-
-std::string fileNameOf(const std::string& path) {
-    return std::filesystem::path(path).filename().string();
-}
-
-}
 
 LineReconstructionDXA::LineReconstructionDXA()
     : _inputCrystalStructure(LATTICE_FCC)
@@ -77,19 +66,7 @@ LineReconstructionDXAOptions LineReconstructionDXA::buildOptions() const {
 }
 
 json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std::string& outputFile) {
-    const auto startTime = std::chrono::high_resolution_clock::now();
-    auto stageStart = startTime;
-    const LineReconstructionDXAOptions options = buildOptions();
-
-    json result;
-    json stageMetrics = json::array();
-    auto markStage = [&](std::string_view name) {
-        const auto now = std::chrono::high_resolution_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - stageStart).count();
-        stageMetrics.push_back({{"stage", name}, {"elapsed_ms", elapsed}});
-        stageStart = now;
-    };
-
+    DXA::LineReconstructionDXALog log;
     FrameAdapter::PreparedAnalysisInput prepared;
     std::string frameError;
     if(!FrameAdapter::prepareAnalysisInput(frame, prepared, &frameError)) {
@@ -106,20 +83,15 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
         );
     }
 
-    auto positions = std::move(prepared.positions);
-    markStage("create_position_property");
-
-    ReconstructedStructureContext context(positions.get(), frame.simulationCell);
+    ReconstructedStructureContext context(prepared.positions.get(), frame.simulationCell);
     context.inputCrystalType = _inputCrystalStructure;
 
     StructureAnalysis structureAnalysis(context);
+    ProgressSteps steps({
+        {"Loading the reconstructed structure", 1.0},
+        {"Reconstructing dislocation lines", 20.0},
+    });
     std::string reconstructionError;
-    // Loading the reconstructed structure, then the line reconstruction and its outputs.
-    ProgressSteps steps({1.0, 20.0});
-    JobProgress::instance().setText("Loading the reconstructed structure");
-    spdlog::info("Loading reconstructed structure for {} atoms ({}, {}, {})...",
-        frame.natoms, fileNameOf(_neighborLatticePath), fileNameOf(_clustersTablePath), fileNameOf(_clusterTransitionsPath));
-    const Stopwatch loadTimer;
     if(!ReconstructedStructureLoader::load(
         frame,
         _neighborLatticePath,
@@ -130,30 +102,18 @@ json LineReconstructionDXA::compute(const LammpsParser::Frame& frame, const std:
     )) {
         return AnalysisResult::failure(reconstructionError);
     }
-    // clusters() includes the graph's built-in null cluster (id 0).
-    spdlog::info("Reconstructed structure loaded in {}: {} clusters, {} cluster transitions, max neighbor distance {:.3f}",
-        loadTimer.elapsed(),
-        structureAnalysis.clusterGraph().clusters().size() - 1,
-        structureAnalysis.clusterGraph().clusterTransitions().size(),
-        structureAnalysis.maximumNeighborDistance());
-    markStage("load_reconstructed_structure");
-    steps.next("Reconstructing dislocation lines");
+    log.dump(structureAnalysis);
 
-    result = DXA::LineReconstructionDXAPipeline::run(
+    steps.next();
+    return DXA::LineReconstructionDXAPipeline::run(
         frame,
         outputFile,
-        options,
+        buildOptions(),
         structureAnalysis,
         context,
         _jsonExporter,
-        markStage
+        log
     );
-
-    result["total_time"] = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::high_resolution_clock::now() - startTime
-    ).count();
-    result["stage_metrics"] = std::move(stageMetrics);
-    return result;
 }
 
 }

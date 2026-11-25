@@ -1,6 +1,7 @@
 #include <volt/lrdxa_engine.h>
 
 #include <volt/core/progress.h>
+#include <volt/lrdxa_log.h>
 #include <volt/helpers/crystal_path_finder.h>
 #include <volt/analysis/structure_analysis.h>
 #include <volt/structures/crystal_structure_types.h>
@@ -14,60 +15,6 @@
 #include <tbb/blocked_range.h>
 
 namespace Volt::DXA {
-
-namespace {
-
-bool isFiniteCell(const DelaunayTessellation& tessellation, DelaunayTessellation::CellHandle cell) {
-    return tessellation.isValidCell(cell);
-}
-
-std::array<DelaunayTessellation::VertexHandle, 4> getCellVertices(
-    const DelaunayTessellation& tessellation,
-    DelaunayTessellation::CellHandle cell) {
-    return {
-        tessellation.cellVertex(cell, 0),
-        tessellation.cellVertex(cell, 1),
-        tessellation.cellVertex(cell, 2),
-        tessellation.cellVertex(cell, 3),
-    };
-}
-
-int getInputPointIndex(const DelaunayTessellation& tessellation, DelaunayTessellation::VertexHandle vertex) {
-    return tessellation.vertexIndex(vertex);
-}
-
-int findInputPointInCell(
-    const DelaunayTessellation& tessellation,
-    DelaunayTessellation::CellHandle cell,
-    int atomIndex) {
-    for(int localVertex = 0; localVertex < 4; ++localVertex) {
-        if(getInputPointIndex(tessellation, tessellation.cellVertex(cell, localVertex)) == atomIndex) {
-            return localVertex;
-        }
-    }
-    return -1;
-}
-
-int computedSubTypeForCrystal(int latticeStructureType) {
-    switch(latticeStructureType) {
-        case LATTICE_FCC:
-            return LATTICE_HCP;
-        case LATTICE_HCP:
-            return LATTICE_FCC;
-        case LATTICE_CUBIC_DIAMOND:
-            return LATTICE_HEX_DIAMOND;
-        case LATTICE_HEX_DIAMOND:
-            return LATTICE_CUBIC_DIAMOND;
-        default:
-            return LATTICE_OTHER;
-    }
-}
-
-bool crystalUsesDirectTessellation(int latticeStructureType) {
-    return computedSubTypeForCrystal(latticeStructureType) == LATTICE_OTHER;
-}
-
-}
 
 LineReconstructionDXAAlgorithm::LineReconstructionDXAAlgorithm(StructureAnalysis& structureAnalysis, StructureContext& context)
     : _structureAnalysis(structureAnalysis)
@@ -98,164 +45,86 @@ size_t LineReconstructionDXAAlgorithm::AtomIndexTripletHash::operator()(const st
     return seed;
 }
 
-void LineReconstructionDXAAlgorithm::run(
-    const LineReconstructionDXAOptions& options,
-    const std::function<void(std::string_view)>& markStage
-) {
-    const Stopwatch runTimer;
-    const auto emitStage = [&](std::string_view stage) {
-        if(markStage) {
-            markStage(stage);
-        }
-    };
+void LineReconstructionDXAAlgorithm::run(const LineReconstructionDXAOptions& options, LineReconstructionDXALog& log) {
+    // Weighed by the stage times of sample runs.
+    ProgressSteps steps({
+        {"Marking perfect crystalline regions", 0.1},
+        {"Building the Delaunay tessellation", 2.0},
+        {"Classifying tetrahedra", 0.1},
+        {"Building tessellation edges", 1.0},
+        {"Assigning atoms to clusters", 0.1},
+        {"Assigning ideal vectors to edges", 1.6},
+        {"Building the facet index", 2.0},
+        {"Mapping the initial dislocation network", 4.0},
+        {"Eliminating spurious dislocation loops", 1.4},
+        {"Mapping after the loop cleanup", 4.0},
+        {"Completing edge vectors", 12.0},
+        {"Mapping the final dislocation network", 4.0},
+        {"Stitching dislocation lines", 2.0},
+        {"Finishing dislocation lines", 0.1},
+    });
+    log.dump(markPerfectCrystallineRegions());
 
-    // Selecting tessellation vertices, Delaunay tessellation, classifying tetrahedra, tessellation
-    // edges, cluster assignment, ideal vectors, facet index, initial snapshot, loop cleanup and its
-    // snapshot, edge vector completion, final snapshot, stitching and finishing the lines, weighed
-    // by the stage times of sample runs.
-    ProgressSteps steps({0.1, 2.0, 0.1, 1.0, 0.1, 1.6, 2.0, 4.0, 1.4, 4.0, 12.0, 4.0, 2.0, 0.1});
-    JobProgress::instance().setText("Marking perfect crystalline regions");
-    markPerfectCrystallineRegions();
-    emitStage("mark_perfect_crystalline_regions");
-    steps.next("Building the Delaunay tessellation");
+    steps.next();
+    buildTessellation(options.tessellationGhostLayerScale * _structureAnalysis.maximumNeighborDistance());
+    log.dump(_tessellation);
 
-    const double ghostLayerSize = options.tessellationGhostLayerScale * _structureAnalysis.maximumNeighborDistance();
-    buildTessellation(ghostLayerSize);
-    emitStage("delaunay_tessellation");
-    steps.next("Classifying tetrahedra");
-
+    steps.next();
     const double alpha = options.alphaScale * _structureAnalysis.maximumNeighborDistance();
-    classifyTetrahedra(alpha);
-    emitStage("classify_tetrahedra");
-    steps.next("Building tessellation edges");
+    log.dump(classifyTetrahedra(alpha));
 
-    generateTessellationEdges();
-    emitStage("generate_tessellation_edges");
-    steps.next("Assigning atoms to clusters");
+    steps.next();
+    log.dump(generateTessellationEdges());
 
-    assignAtomsToClusters();
-    emitStage("assign_atoms_to_clusters");
-    steps.next("Assigning ideal vectors to edges");
+    steps.next();
+    log.dump(assignAtomsToClusters());
 
-    assignIdealVectorsToEdges(options.crystalPathSteps);
-    emitStage("assign_ideal_vectors_to_edges");
-    steps.next("Building the facet index");
+    steps.next();
+    log.dump(assignIdealVectorsToEdges(options.crystalPathSteps));
 
-    buildFacetLookupMap();
-    emitStage("build_facet_lookup_map");
-    steps.next("Mapping the initial dislocation network");
+    steps.next();
+    log.dump(buildFacetLookupMap());
 
+    steps.next();
     _dislocationSegments.clear();
     _unassignedEdgesOutput.clear();
     _interfaceMesh.clear();
     _currentStage = 0;
+    log.dump(MappedNetwork{MappedNetwork::Pass::Initial, takeSnapshot(alpha)});
 
-    struct SnapshotCounts {
-        size_t segments;
-        size_t unresolvedEdges;
-        size_t interfaceFacets;
-    };
-    // Each snapshot appends its stage's complete set of segments, unresolved edges and interface
-    // facets, so the growth of each output is that stage's count.
-    const auto takeSnapshot = [&]() {
-        const size_t segments = _dislocationSegments.size();
-        const size_t edges = _unassignedEdgesOutput.size();
-        const size_t facets = _interfaceMesh.faceCount();
-        dumpDislocationSnapshot(alpha);
-        return SnapshotCounts{
-            _dislocationSegments.size() - segments,
-            _unassignedEdgesOutput.size() - edges,
-            _interfaceMesh.faceCount() - facets
-        };
-    };
-    const auto logStage = [&](const char* label, const SnapshotCounts& counts, const Stopwatch& timer) {
-        spdlog::info("Stage {} ({}): {} dislocation segments, {} unresolved edges, {} interface facets in {}",
-            _currentStage - 1, label, counts.segments, counts.unresolvedEdges, counts.interfaceFacets, timer.elapsed());
-    };
+    steps.next();
+    log.dump(eliminateSpuriousDislocationLoops());
 
-    Stopwatch stageTimer;
-    SnapshotCounts snapshot = takeSnapshot();
-    logStage("initial mapping", snapshot, stageTimer);
-    emitStage("snapshot_initial_mapping");
-    steps.next("Eliminating spurious dislocation loops");
+    steps.next();
+    const NetworkSnapshot cleanedNetwork = takeSnapshot(alpha);
+    log.dump(MappedNetwork{MappedNetwork::Pass::AfterLoopCleanup, cleanedNetwork});
 
-    eliminateSpuriousDislocationLoops();
-    emitStage("eliminate_spurious_dislocation_loops");
-    steps.next("Mapping after the loop cleanup");
-
-    stageTimer.restart();
-    snapshot = takeSnapshot();
-    logStage("after loop cleanup", snapshot, stageTimer);
-    emitStage("snapshot_after_loop_cleanup");
-    steps.next("Completing edge vectors");
-
+    steps.next();
     const bool skipComplementPasses = crystalUsesDirectTessellation(_context.inputCrystalType)
         && _structureAnalysis.clusterGraph().clusterTransitions().empty();
-
     if(skipComplementPasses) {
-        spdlog::info("Skipping edge vector completion: {} crystal without cluster transitions",
-            latticeStructureTypeName(_context.inputCrystalType));
-        emitStage("skip_complement_edge_vectors");
+        log.dump(SkippedEdgeVectorCompletion{_context.inputCrystalType});
     } else {
-        spdlog::info("Completing edge vectors around {} unresolved edges...", snapshot.unresolvedEdges);
-        const Stopwatch completionTimer;
-        const size_t unresolvedBeforeCompletion = snapshot.unresolvedEdges;
-        int iteration = 0;
-        while(true) {
-            bool changed = false;
-            const Stopwatch iterationTimer;
-            ++iteration;
-
-            changed |= complementEdgeVectors(true);
-            emitStage("complement_edge_vectors_forward");
-
-            const size_t unresolvedAfterForward = takeSnapshot().unresolvedEdges;
-            emitStage("snapshot_after_forward_complement");
-
-            changed |= complementEdgeVectors(false);
-            emitStage("complement_edge_vectors_backward");
-
-            snapshot = takeSnapshot();
-            emitStage("snapshot_after_backward_complement");
-
-            if(iteration <= 10 || iteration % 10 == 0) {
-                spdlog::info("  Iteration {}: {} unresolved edges after the forward pass, {} after the backward pass ({})",
-                    iteration, unresolvedAfterForward, snapshot.unresolvedEdges, iterationTimer.elapsed());
-            }
-
-            if(!changed) break;
-        }
-        spdlog::info("Edge vector completion converged after {} iteration{} in {}: {} edges recovered, {} still unresolved",
-            iteration, iteration == 1 ? "" : "s", completionTimer.elapsed(),
-            unresolvedBeforeCompletion - snapshot.unresolvedEdges, snapshot.unresolvedEdges);
+        EdgeVectorCompletionPass pass;
+        do {
+            pass = completeEdgeVectors(pass.iteration + 1, alpha);
+            log.dump(pass);
+        } while(pass.changed);
+        log.dump(EdgeVectorCompletion{pass.iteration, cleanedNetwork.unresolvedEdges, pass.unresolvedAfterBackward});
     }
-    steps.next("Mapping the final dislocation network");
 
-    stageTimer.restart();
-    snapshot = takeSnapshot();
-    logStage("final mapping", snapshot, stageTimer);
-    emitStage("snapshot_final_mapping");
-    steps.next("Stitching dislocation lines");
+    steps.next();
+    log.dump(MappedNetwork{MappedNetwork::Pass::Final, takeSnapshot(alpha)});
 
-    stitchDislocationLines();
-    emitStage("stitch_dislocation_lines");
-    steps.next("Finishing dislocation lines");
+    steps.next();
+    log.dump(stitchDislocationLines());
 
+    steps.next();
     finishDislocationLines(options.smoothingIterations, options.linePointInterval);
-    emitStage("finish_dislocation_lines");
-
-    spdlog::info(
-        "Line reconstruction finished in {}: {} dislocation lines, {} snapshot segments and {} unresolved edge records over {} stages",
-        runTimer.elapsed(),
-        _dislocationLines.size(),
-        _dislocationSegments.size(),
-        _unassignedEdgesOutput.size(),
-        _currentStage
-    );
+    log.dump(_dislocationLines);
 }
 
-void LineReconstructionDXAAlgorithm::markPerfectCrystallineRegions() {
-    const Stopwatch timer;
+TessellationVertices LineReconstructionDXAAlgorithm::markPerfectCrystallineRegions() {
     const size_t atomCount = _context.atomCount();
     const int computedSubType = computedSubTypeForCrystal(_context.inputCrystalType);
     const bool directCrystalTessellation = crystalUsesDirectTessellation(_context.inputCrystalType);
@@ -300,16 +169,10 @@ void LineReconstructionDXAAlgorithm::markPerfectCrystallineRegions() {
         _delaunayAtomMask->setInt(atomIndex, includeAtom);
         _delaunayVertexCount += includeAtom;
     }
-    spdlog::info("Selected {} of {} atoms ({:.1f}%) as tessellation vertices ({}) in {}",
-        _delaunayVertexCount, atomCount,
-        percentOf(static_cast<std::uint64_t>(_delaunayVertexCount), atomCount),
-        directCrystalTessellation ? "whole crystal" : "defect regions",
-        timer.elapsed());
+    return TessellationVertices{_delaunayVertexCount, atomCount, directCrystalTessellation};
 }
 
 void LineReconstructionDXAAlgorithm::buildTessellation(double ghostLayerSize) {
-    spdlog::info("Building Delaunay tessellation of {} atoms (ghost layer {:.3f})...", _delaunayVertexCount, ghostLayerSize);
-    const Stopwatch timer;
     _tessellation.generateTessellation(
         _context.simCell,
         _context.positions->constDataPoint3(),
@@ -318,12 +181,9 @@ void LineReconstructionDXAAlgorithm::buildTessellation(double ghostLayerSize) {
         false,
         _delaunayAtomMask ? _delaunayAtomMask->constDataInt() : nullptr
     );
-    spdlog::info("Delaunay tessellation ready in {}: {} primary tetrahedra",
-        timer.elapsed(), _tessellation.numberOfPrimaryTetrahedra());
 }
 
-void LineReconstructionDXAAlgorithm::classifyTetrahedra(double alpha) {
-    const Stopwatch timer;
+ClassifiedTetrahedra LineReconstructionDXAAlgorithm::classifyTetrahedra(double alpha) {
     _filledCells.assign(_tessellation.numberOfTetrahedra(), false);
     auto isInteriorTetrahedron = [&](DelaunayTessellation::CellHandle cell) -> bool {
         if(_tessellation.isGhostCell(cell)) {
@@ -357,11 +217,10 @@ void LineReconstructionDXAAlgorithm::classifyTetrahedra(double alpha) {
             }
             progress.advance(r.size());
         });
-    spdlog::info("Classified {} tetrahedra by alpha-shape test (alpha {:.3f}) in {}", numCells, alpha, timer.elapsed());
+    return ClassifiedTetrahedra{numCells, alpha};
 }
 
-void LineReconstructionDXAAlgorithm::generateTessellationEdges() {
-    const Stopwatch timer;
+TessellationEdges LineReconstructionDXAAlgorithm::generateTessellationEdges() {
     size_t filledCellCount = 0;
     size_t edgeCount = 0;
     ProgressReporter progress("Generating tessellation edges", _tessellation.numberOfTetrahedra());
@@ -398,12 +257,10 @@ void LineReconstructionDXAAlgorithm::generateTessellationEdges() {
             ++edgeCount;
         }
     }
-    spdlog::info("Generated {} tessellation edges from {} filled tetrahedra ({:.1f}% of primary) in {}",
-        edgeCount, filledCellCount, percentOf(filledCellCount, _tessellation.numberOfPrimaryTetrahedra()), timer.elapsed());
+    return TessellationEdges{edgeCount, filledCellCount, _tessellation.numberOfPrimaryTetrahedra()};
 }
 
-void LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
-    const Stopwatch timer;
+ClusterAssignment LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
     std::vector<AtomIndex> unassignedAtoms;
     for(AtomIndex atomIndex = 0; atomIndex < static_cast<AtomIndex>(_context.atomCount()); ++atomIndex) {
         Cluster* cluster = _structureAnalysis.atomCluster(atomIndex);
@@ -447,12 +304,10 @@ void LineReconstructionDXAAlgorithm::assignAtomsToClusters() {
         }
         unassignedAtoms.resize(remaining);
     }
-    spdlog::info("Assigned {} of {} non-crystalline atoms to a neighboring crystal cluster in {} ({} passes, {} left unassigned)",
-        nonCrystallineAtoms - unassignedAtoms.size(), nonCrystallineAtoms, timer.elapsed(), passes, unassignedAtoms.size());
+    return ClusterAssignment{nonCrystallineAtoms, passes, unassignedAtoms.size()};
 }
 
-void LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
-    const Stopwatch timer;
+SpuriousLoopElimination LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
     std::unordered_map<TessellationEdge*, int> compatibleCount;
     std::unordered_map<TessellationEdge*, int> incompatibleCount;
     size_t mappedCells = 0;
@@ -507,13 +362,10 @@ void LineReconstructionDXAAlgorithm::eliminateSpuriousDislocationLoops() {
         invalidated++;
     }
 
-    spdlog::info("Spurious loop elimination: invalidated {} edges ({} of {} fully mapped tetrahedra incompatible) in {}",
-        invalidated, incompatibleCells, mappedCells, timer.elapsed());
+    return SpuriousLoopElimination{invalidated, incompatibleCells, mappedCells};
 }
 
-void LineReconstructionDXAAlgorithm::assignIdealVectorsToEdges(int crystalPathSteps) {
-    spdlog::info("Assigning ideal lattice vectors to tessellation edges (crystal paths of up to {} steps)...", crystalPathSteps);
-    const Stopwatch timer;
+IdealVectorAssignment LineReconstructionDXAAlgorithm::assignIdealVectorsToEdges(int crystalPathSteps) {
     CrystalPathFinder pathFinder(_structureAnalysis, crystalPathSteps);
     size_t edgeCount = 0;
     size_t assignedCount = 0;
@@ -547,12 +399,10 @@ void LineReconstructionDXAAlgorithm::assignIdealVectorsToEdges(int crystalPathSt
             }
         }
     }
-    spdlog::info("Assigned ideal vectors to {} of {} edges in {}: {} unresolved, {} skipped (non-crystalline atom or no cluster transition)",
-        assignedCount, edgeCount, timer.elapsed(), unresolvedCount, edgeCount - assignedCount - unresolvedCount);
+    return IdealVectorAssignment{edgeCount, assignedCount, unresolvedCount};
 }
 
-void LineReconstructionDXAAlgorithm::buildFacetLookupMap() {
-    const Stopwatch timer;
+FacetIndex LineReconstructionDXAAlgorithm::buildFacetLookupMap() {
     _primaryFacetLookupMap.clear();
     _primaryFacetLookupMap.reserve(_unassignedEdges.size() * 6);
     ProgressReporter progress("Indexing facets", _tessellation.numberOfTetrahedra());
@@ -585,7 +435,16 @@ void LineReconstructionDXAAlgorithm::buildFacetLookupMap() {
             _primaryFacetLookupMap.emplace(facetVertices, std::make_pair(cell, facet));
         }
     }
-    spdlog::info("Indexed {} facets with missing edge vectors in {}", _primaryFacetLookupMap.size(), timer.elapsed());
+    return FacetIndex{_primaryFacetLookupMap.size()};
+}
+
+EdgeVectorCompletionPass LineReconstructionDXAAlgorithm::completeEdgeVectors(int iteration, double alpha) {
+    EdgeVectorCompletionPass pass{iteration};
+    pass.changed = complementEdgeVectors(true);
+    pass.unresolvedAfterForward = takeSnapshot(alpha).unresolvedEdges;
+    pass.changed |= complementEdgeVectors(false);
+    pass.unresolvedAfterBackward = takeSnapshot(alpha).unresolvedEdges;
+    return pass;
 }
 
 bool LineReconstructionDXAAlgorithm::complementEdgeVectors(bool forward) {
@@ -806,11 +665,19 @@ std::array<bool, 6> LineReconstructionDXAAlgorithm::determineConservativeGlideEd
     return result;
 }
 
-void LineReconstructionDXAAlgorithm::dumpDislocationSnapshot(double alpha) {
+NetworkSnapshot LineReconstructionDXAAlgorithm::takeSnapshot(double alpha) {
+    const size_t segments = _dislocationSegments.size();
+    const size_t edges = _unassignedEdgesOutput.size();
+    const size_t facets = _interfaceMesh.faceCount();
     appendDislocationSegmentSnapshot();
     appendUnassignedEdgeSnapshot();
     appendInterfaceMeshSnapshot(alpha);
-    ++_currentStage;
+    return NetworkSnapshot{
+        _currentStage++,
+        _dislocationSegments.size() - segments,
+        _unassignedEdgesOutput.size() - edges,
+        _interfaceMesh.faceCount() - facets
+    };
 }
 
 void LineReconstructionDXAAlgorithm::appendDislocationSegmentSnapshot() {
@@ -890,8 +757,7 @@ void LineReconstructionDXAAlgorithm::appendDislocationSegmentSnapshot() {
     }
 }
 
-void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
-    const Stopwatch timer;
+StitchedLines LineReconstructionDXAAlgorithm::stitchDislocationLines() {
     _dislocationLines.clear();
 
     struct TmpSegment {
@@ -1197,8 +1063,7 @@ void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
     }
 
     if(tmpSegments.empty()) {
-        spdlog::info("No dislocation segments to stitch ({})", timer.elapsed());
-        return;
+        return StitchedLines{_dislocationLines};
     }
 
     const int nodeCount = static_cast<int>(nodePositions.size());
@@ -1310,30 +1175,17 @@ void LineReconstructionDXAAlgorithm::stitchDislocationLines() {
         });
     }
 
-    int closedCount = 0;
-    int openCount = 0;
-    double totalLength = 0.0;
-    for(const auto& line : _dislocationLines) {
-        if(line.isClosed) closedCount++;
-        else openCount++;
-        for(size_t i = 1; i < line.points.size(); ++i) {
-            totalLength += (line.points[i] - line.points[i - 1]).length();
-        }
-        if(line.isClosed && line.points.size() > 1) {
-            totalLength += (line.points.front() - line.points.back()).length();
-        }
-    }
-
-    spdlog::info("Stitched {} dislocation lines ({} closed, {} open), total length {:.2f}, from {} segments and {} nodes in {}",
-        _dislocationLines.size(), closedCount, openCount, totalLength, segCount, nodeCount, timer.elapsed());
-    if(glideFilterCalls > 0) {
-        spdlog::info("  FCC glide filter: {} cells checked, {} had glide edges, {} facets adjusted",
-            glideFilterCalls, glideFilterHits, glideAdjustedFacets);
-    }
+    return StitchedLines{
+        _dislocationLines,
+        static_cast<size_t>(segCount),
+        static_cast<size_t>(nodeCount),
+        glideFilterCalls,
+        glideFilterHits,
+        glideAdjustedFacets
+    };
 }
 
 void LineReconstructionDXAAlgorithm::finishDislocationLines(int smoothingLevel, double linePointInterval) {
-    const Stopwatch timer;
     for(auto& line : _dislocationLines) {
         line.burgersVector = ClusterVector(-line.burgersVector.localVec(), line.burgersVector.cluster());
     }
@@ -1448,72 +1300,31 @@ void LineReconstructionDXAAlgorithm::finishDislocationLines(int smoothingLevel, 
     }
 
     classifyDislocationTypes();
-
-    double finalLength = 0.0;
-    int closedCount = 0;
-    for(const auto& line : _dislocationLines) {
-        double lineLength = 0.0;
-        if(line.isClosed) {
-            closedCount++;
-        }
-        for(size_t i = 1; i < line.points.size(); ++i) {
-            lineLength += (line.points[i] - line.points[i - 1]).length();
-        }
-        if(line.isClosed && line.points.size() > 1) {
-            lineLength += (line.points.front() - line.points.back()).length();
-        }
-        finalLength += lineLength;
-    }
-    spdlog::info(
-        "Finished {} dislocation lines ({} closed, {} open), final total length {:.2f}, in {}",
-        _dislocationLines.size(),
-        closedCount,
-        static_cast<int>(_dislocationLines.size()) - closedCount,
-        finalLength,
-        timer.elapsed()
-    );
 }
 
 void LineReconstructionDXAAlgorithm::classifyDislocationTypes() {
     constexpr double TOL = 0.01;
 
-    int perfect = 0, shockley = 0, frank = 0, stairrod = 0, hirth = 0, other = 0;
-    int fccLines = 0;
-
     for(auto& line : _dislocationLines) {
         if(line.structureType != LATTICE_FCC) {
-            other++;
             continue;
         }
-        fccLines++;
         const Vector3& b = line.burgersVector.localVec();
         double sqMag = b.x() * b.x() + b.y() * b.y() + b.z() * b.z();
 
         if(std::abs(sqMag - 0.5) < TOL) {
             line.dislocationTypeId = 1;
-            perfect++;
         } else if(std::abs(sqMag - 1.0 / 6.0) < TOL) {
             line.dislocationTypeId = 2;
-            shockley++;
         } else if(std::abs(sqMag - 1.0 / 3.0) < TOL) {
             line.dislocationTypeId = 3;
-            frank++;
         } else if(std::abs(sqMag - 1.0 / 18.0) < TOL) {
             line.dislocationTypeId = 4;
-            stairrod++;
         } else if(std::abs(sqMag - 1.0 / 9.0) < TOL) {
             line.dislocationTypeId = 5;
-            hirth++;
         } else {
             line.dislocationTypeId = 0;
-            other++;
         }
-    }
-
-    // Lines of non-FCC crystals all land in "other", so the breakdown says nothing without FCC lines.
-    if(fccLines > 0) {
-        spdlog::info("FCC dislocation types: {} perfect, {} Shockley, {} Frank, {} stair-rod, {} Hirth, {} other",
-            perfect, shockley, frank, stairrod, hirth, other);
     }
 }
 

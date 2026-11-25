@@ -3,9 +3,7 @@
 #include <volt/core/lammps_parser.h>
 #include <volt/lrdxa_options.h>
 #include <nlohmann/json.hpp>
-#include <functional>
 #include <string>
-#include <string_view>
 
 namespace Volt {
 
@@ -17,6 +15,8 @@ class LineReconstructionJsonExporter;
 
 namespace DXA {
 
+class LineReconstructionDXALog;
+
 class LineReconstructionDXAPipeline {
 public:
     static json run(
@@ -26,7 +26,7 @@ public:
         StructureAnalysis& reconstructionStructureAnalysis,
         StructureContext& reconstructionContext,
         LineReconstructionJsonExporter& jsonExporter,
-        const std::function<void(std::string_view)>& markStage
+        LineReconstructionDXALog& log
     );
 };
 

@@ -68,7 +68,7 @@ else()
 endif()
 
 file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
-list(FILTER LIB_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+list(FILTER LIB_SOURCES EXCLUDE REGEX ".*/src/plugin\\.cpp$")
 
 add_library(${PROJECT_NAME}_lib STATIC ${LIB_SOURCES})
 set_target_properties(${PROJECT_NAME}_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -87,7 +87,7 @@ target_link_libraries(${PROJECT_NAME}_lib PRIVATE
     nlohmann_json::nlohmann_json
 )
 
-add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/plugin.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_precompile_headers(${PROJECT_NAME} PRIVATE <volt/core/volt.h>)
 
