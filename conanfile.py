@@ -4,14 +4,14 @@ from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps, cmake_layout
 
 class LineReconstructionDXAConan(ConanFile):
     name = "line-reconstruction-dxa"
-    version = "2.3.1"
+    version = "2.3.2"
     package_type = "static-library"
     license = "MIT"
     settings = "os", "arch", "compiler", "build_type"
     requires = (
-        "opendxa/[>=2.0]",
-        "coretoolkit/[>=2.8]",
-        "structure-identification/[>=2.1]",
+        "opendxa/[>=2.6.6]",
+        "coretoolkit/[>=2.9]",
+        "structure-identification/[>=2.4]",
         "common-neighbor-analysis/[>=2.0]",
         "polyhedral-template-matching/[>=2.0]",
         "boost/1.88.0",
