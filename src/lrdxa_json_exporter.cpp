@@ -13,10 +13,13 @@
 
 namespace Volt {
 
-using DxaSerialization::Detail::getGlobalBurgersVector;
+using DxaSerialization::Detail::DislocationLine;
 using DxaSerialization::Detail::polylineLength;
+using DxaSerialization::Detail::segmentProperties;
+using DxaSerialization::Detail::SegmentProperties;
 using DxaSerialization::Detail::UnwrappedMesh;
 using DxaSerialization::Detail::unwrapFaces;
+using DxaSerialization::Detail::writeBurgersColumns;
 
 template <typename MeshType>
 json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const StructureAnalysis& structureAnalysis) {
@@ -25,8 +28,8 @@ json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const Str
     const UnwrappedMesh unwrapped = unwrapFaces(mesh, structureAnalysis.context().simCell);
 
     meshData["main_listing"] = {
-        {"total_nodes", static_cast<int>(unwrapped.points.size())},
-        {"total_facets", static_cast<int>(unwrapped.faces.size())}
+        {"total_nodes", unwrapped.points.size()},
+        {"total_facets", unwrapped.faces.size()}
     };
 
     // One progress span over both JSON loops: they dominate the export of large meshes.
@@ -34,11 +37,7 @@ json LineReconstructionJsonExporter::getMeshData(const MeshType& mesh, const Str
     json points = json::array();
     for(size_t i = 0; i < unwrapped.points.size(); ++i) {
         progress.update(i + 1);
-        const auto& pos = unwrapped.points[i];
-        points.push_back({
-            {"index", static_cast<int>(i)},
-            {"position", {pos.x(), pos.y(), pos.z()}}
-        });
+        points.push_back({{"index", i}, {"position", unwrapped.points[i]}});
     }
 
     json facets = json::array();
@@ -64,43 +63,25 @@ void LineReconstructionJsonExporter::writeLineSegmentsParquetToFile(
     const SimulationCell& simulationCell,
     const std::string& filePath
 ) {
-    struct Row {
-        std::vector<Point3> points;
-        double length;
-        const DXA::LineReconstructionSegment* segment;
+    struct Row : DislocationLine {
+        const DXA::LineReconstructionSegment* source;
     };
     std::vector<Row> rows;
     rows.reserve(segments.size());
     for(const auto& segment : segments) {
+        const SegmentProperties properties = segmentProperties(
+            segment.burgersVector, structureTypeName(segment.structureType), segment.clusterId, 0
+        );
         for(auto& points : DxaSerialization::splitAtPeriodicBoundaries({segment.position1, segment.position2}, simulationCell)) {
             const double length = polylineLength(points);
-            rows.push_back({std::move(points), length, &segment});
+            rows.push_back({{std::move(points), length, properties}, &segment});
         }
     }
 
-    streamLinesToParquet(
-        filePath,
-        rows.size(),
-        [&](std::size_t i, std::vector<Point3>& outPoints) { outPoints = rows[i].points; },
-        [&](ColumnarLineWriter& writer, std::size_t i) {
-            const auto& row = rows[i];
-            const auto& segment = *row.segment;
-            const Vector3 burgersLocal = segment.burgersVector.localVec();
-            const Vector3 burgersGlobal = getGlobalBurgersVector(segment.burgersVector);
-            const std::string structureName = structureTypeName(segment.structureType);
-            const auto family = DxaSerialization::classifyBurgersFamily(burgersLocal, structureName);
-            writer.field("length", row.length);
-            writer.field("num_points", row.points.size());
-            writer.field("magnitude", burgersLocal.length());
-            writer.field("burgers_vector_local", std::vector<double>{burgersLocal.x(), burgersLocal.y(), burgersLocal.z()});
-            writer.field("burgers_vector_global", std::vector<double>{burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()});
-            writer.field("crystal_structure", structureName);
-            writer.field("burgers_family", family.name);
-            writer.field("burgers_family_label", family.label);
-            writer.field("cluster_id", segment.clusterId);
-            writer.field("stage", segment.stage);
-        }
-    );
+    streamLinesToParquet(filePath, rows, &Row::points, [](ColumnarRowWriter& writer, const Row& row) {
+        writeBurgersColumns(writer, row);
+        writer.field("stage", row.source->stage);
+    });
 }
 
 void LineReconstructionJsonExporter::writeDislocationLinesParquetToFile(
@@ -108,44 +89,26 @@ void LineReconstructionJsonExporter::writeDislocationLinesParquetToFile(
     const SimulationCell& simulationCell,
     const std::string& filePath
 ) {
-    struct Row {
-        std::vector<Point3> points;
-        double length;
-        const DXA::LineReconstructionDislocationLine* line;
+    struct Row : DislocationLine {
+        const DXA::LineReconstructionDislocationLine* source;
     };
     std::vector<Row> rows;
     rows.reserve(lines.size());
     for(const auto& line : lines) {
+        const SegmentProperties properties = segmentProperties(
+            line.burgersVector, structureTypeName(line.structureType), line.clusterId, 0
+        );
         for(auto& points : DxaSerialization::splitAtPeriodicBoundaries(line.points, simulationCell)) {
             const double length = polylineLength(points);
-            rows.push_back({std::move(points), length, &line});
+            rows.push_back({{std::move(points), length, properties}, &line});
         }
     }
 
-    streamLinesToParquet(
-        filePath,
-        rows.size(),
-        [&](std::size_t i, std::vector<Point3>& outPoints) { outPoints = rows[i].points; },
-        [&](ColumnarLineWriter& writer, std::size_t i) {
-            const auto& row = rows[i];
-            const auto& line = *row.line;
-            const Vector3 burgersLocal = line.burgersVector.localVec();
-            const Vector3 burgersGlobal = getGlobalBurgersVector(line.burgersVector);
-            const std::string structureName = structureTypeName(line.structureType);
-            const auto family = DxaSerialization::classifyBurgersFamily(burgersLocal, structureName);
-            writer.field("length", row.length);
-            writer.field("num_points", row.points.size());
-            writer.field("magnitude", burgersLocal.length());
-            writer.field("burgers_vector_local", std::vector<double>{burgersLocal.x(), burgersLocal.y(), burgersLocal.z()});
-            writer.field("burgers_vector_global", std::vector<double>{burgersGlobal.x(), burgersGlobal.y(), burgersGlobal.z()});
-            writer.field("crystal_structure", structureName);
-            writer.field("burgers_family", family.name);
-            writer.field("burgers_family_label", family.label);
-            writer.field("cluster_id", line.clusterId);
-            writer.field("is_closed", line.isClosed);
-            writer.field("dislocation_type_id", line.dislocationTypeId);
-        }
-    );
+    streamLinesToParquet(filePath, rows, &Row::points, [](ColumnarRowWriter& writer, const Row& row) {
+        writeBurgersColumns(writer, row);
+        writer.field("is_closed", row.source->isClosed);
+        writer.field("dislocation_type_id", row.source->dislocationTypeId);
+    });
 }
 
 json LineReconstructionJsonExporter::exportUnassignedEdgesToJson(
@@ -155,16 +118,16 @@ json LineReconstructionJsonExporter::exportUnassignedEdgesToJson(
     for(size_t index = 0; index < edges.size(); ++index) {
         const auto& edge = edges[index];
         edgeArray.push_back({
-            {"edge_id", static_cast<int>(index)},
-            {"position1", {edge.position1.x(), edge.position1.y(), edge.position1.z()}},
-            {"position2", {edge.position2.x(), edge.position2.y(), edge.position2.z()}},
+            {"edge_id", index},
+            {"position1", edge.position1},
+            {"position2", edge.position2},
             {"atoms", {edge.atom1, edge.atom2}},
             {"stage", edge.stage}
         });
     }
 
     json data;
-    data["main_listing"] = {{"unassigned_edges", static_cast<int>(edges.size())}};
+    data["main_listing"] = {{"unassigned_edges", edges.size()}};
     data["sub_listings"] = {{"unassigned_edges", edgeArray}};
     return data;
 }
